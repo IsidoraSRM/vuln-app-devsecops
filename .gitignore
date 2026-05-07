@@ -8,3 +8,6 @@ frontend/coverage/
 frontend/node_modules/
 certbot/*
 .idea/
+
+# Entornos virtuales y credenciales
+.env
