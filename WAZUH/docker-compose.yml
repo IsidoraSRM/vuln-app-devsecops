@@ -1,0 +1,46 @@
+version: '3.8'
+
+services:
+  db:
+    image: timescale/timescaledb:latest-pg14
+    container_name: wazuh_db
+    environment:
+      - POSTGRES_USER=admin_db
+      - POSTGRES_PASSWORD=password_seguro_123
+      - POSTGRES_DB=vulnerability_dashboard
+    ports:
+      - "5433:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    networks:
+      - wazuh_net
+    restart: unless-stopped
+
+  middleware_api:
+    build: .
+    container_name: wazuh_api
+    ports:
+      - "8000:8000"
+    environment:
+      # Ahora apuntamos al servicio más corto y fácil: 'db'
+      - DATABASE_URL=postgresql://admin_db:password_seguro_123@db:5432/vulnerability_dashboard
+      - WAZUH_API_URL=https://IP_PENDIENTE_ORACLE:55000
+      - WAZUH_USER=admin
+      - WAZUH_PASSWORD=pendiente
+    depends_on:
+      - db
+    volumes:
+      - ./app:/app
+    networks:
+      - wazuh_net
+    command: uvicorn main:app --host 0.0.0.0 --port 8000 --reload
+    restart: unless-stopped
+
+# ¡Esto es lo que soluciona el error! Fuerza a Docker a conectar los nombres.
+networks:
+  wazuh_net:
+    driver: bridge
+
+volumes:
+  pgdata:
+    name: wazuh_db_data
