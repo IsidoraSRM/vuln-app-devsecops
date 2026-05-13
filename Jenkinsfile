@@ -10,16 +10,17 @@ pipeline {
     stages {
         stage('SAST: SonarQube Code Analysis') {
             steps {
-                script {
-                    withSonarQubeEnv('sonarqube') {
-                        docker.image('sonarsource/sonar-scanner-cli:latest').inside('--user=root') {
-                            sh '''
-                                sonar-scanner \
-                                    -Dproject.settings=dev-tools/sonarqube/sonar-project.properties \
-                                    -Dsonar.projectBaseDir=.
-                            '''
-                        }
-                    }
+                withSonarQubeEnv('sonarqube') {
+                    sh '''
+                        docker run --rm \
+                            -v "$WORKSPACE:/usr/src" \
+                            -w /usr/src \
+                            -e SONAR_HOST_URL="$SONAR_HOST_URL" \
+                            -e SONAR_TOKEN="$SONAR_AUTH_TOKEN" \
+                            sonarsource/sonar-scanner-cli:latest \
+                            -Dproject.settings=dev-tools/sonarqube/sonar-project.properties \
+                            -Dsonar.projectBaseDir=.
+                    '''
                 }
             }
         }
