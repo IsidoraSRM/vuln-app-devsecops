@@ -13,6 +13,7 @@ pipeline {
                 withSonarQubeEnv('sonarqube') {
                     sh '''
                         docker run --rm \
+                            --network=host \
                             -v "$WORKSPACE:/usr/src" \
                             -w /usr/src \
                             -e SONAR_HOST_URL="$SONAR_HOST_URL" \
