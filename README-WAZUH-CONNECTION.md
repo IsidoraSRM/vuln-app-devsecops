@@ -1,3 +1,5 @@
+##
+
 # Guía de Conexión a Wazuh (Local y Producción)
 
 Este documento detalla los pasos y comandos necesarios para levantar un entorno Wazuh de pruebas y cómo conectar la aplicación `vuln-app-devsecops` a cualquier servidor Wazuh (como el del profesor).
