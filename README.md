@@ -1,5 +1,3 @@
----
-
 # Guía de Despliegue en Producción
 
 Este documento detalla los pasos necesarios para desplegar la aplicación en un entorno de producción, ya sea en un servidor con dominio público o en una red local utilizando certificados SSL autofirmados.
