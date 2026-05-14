@@ -10,7 +10,7 @@ pipeline {
     stages {
         stage('SAST: SonarQube Code Analysis') {
             steps {
-                withSonarQubeEnv('sonarqube') {
+                withSonarQubeEnv('SonarQube') {
                     sh '''
                         docker run --rm \
                             --network=host \
@@ -40,7 +40,7 @@ pipeline {
             echo 'Pipeline OK — analisis SonarQube paso el quality gate.'
         }
         failure {
-            echo 'Pipeline FAILED — revisa SonarQube en http://18.219.1.206:9000/dashboard?id=vuln-app'
+            echo 'Pipeline FAILED — revisa SonarQube en http://18.116.72.101:9000/dashboard?id=vuln-app'
         }
     }
 }
