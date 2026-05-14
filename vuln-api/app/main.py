@@ -1,6 +1,8 @@
 # app/main.py
+import logging
 import re
 import os
+import time
 from fastapi import FastAPI, Depends, HTTPException
 from fastapi.security import OAuth2PasswordRequestForm
 from fastapi.middleware.cors import CORSMiddleware
@@ -10,6 +12,7 @@ from typing import List, Annotated, Optional
 from pydantic import BaseModel
 from sqlalchemy.sql import func
 from .db import Base, engine, get_db, SessionLocal
+from .logging_config import configure_logging
 from .models import User, WazuhVulnerability, WazuhConnection
 from .auth import (
     authenticate_user,
@@ -21,6 +24,9 @@ from .auth import (
 from .models import User, WazuhVulnerability, WazuhConnection, VulnerabilityHistory
 from .wazuh_client import fetch_all_vulns, test_connection
 from .crypto import encrypt, decrypt
+
+configure_logging()
+log = logging.getLogger(__name__)
 
 Base.metadata.create_all(bind=engine)
 
@@ -47,7 +53,7 @@ def create_default_admin():
     try:
         admin_exists = db.query(User).filter(User.username == "admin").first()
         if not admin_exists:
-            print("Creando usuario admin default...")
+            log.info("creating_default_admin_user")
             default_admin = User(
                 username="admin", 
                 password_hash=hash_password("admin"), 
@@ -325,13 +331,41 @@ def sync_connection(
     if not conn.is_active:
         raise HTTPException(status_code=400, detail="La conexión está inactiva")
 
-    raw_vulns = fetch_all_vulns(
-        conn.indexer_url, conn.wazuh_user, decrypt(conn.wazuh_password)
+    log.info(
+        "sync_started",
+        extra={"connection_id": conn.id, "connection_name": conn.name, "user": current_user.username},
     )
+    start = time.monotonic()
 
-    count = process_wazuh_vulnerabilities(db, conn.id, raw_vulns)
-    db.commit()
+    try:
+        raw_vulns = fetch_all_vulns(
+            conn.indexer_url, conn.wazuh_user, decrypt(conn.wazuh_password)
+        )
+        log.info(
+            "sync_fetched",
+            extra={"connection_id": conn.id, "fetched_count": len(raw_vulns)},
+        )
 
+        count = process_wazuh_vulnerabilities(db, conn.id, raw_vulns)
+        db.commit()
+    except Exception:
+        db.rollback()
+        log.exception(
+            "sync_failed",
+            extra={"connection_id": conn.id, "connection_name": conn.name},
+        )
+        raise HTTPException(status_code=502, detail="Error al sincronizar con Wazuh")
+
+    elapsed_ms = int((time.monotonic() - start) * 1000)
+    log.info(
+        "sync_finished",
+        extra={
+            "connection_id": conn.id,
+            "connection_name": conn.name,
+            "synced_count": count,
+            "elapsed_ms": elapsed_ms,
+        },
+    )
     return {"synced": count, "connection": conn.name}
 
 
@@ -442,24 +476,52 @@ def sync_all_connections(
     db: Session = Depends(get_db), current_user: User = Depends(get_current_user)
 ):
     conns = db.query(WazuhConnection).filter(WazuhConnection.is_active == True).all()
+    log.info(
+        "sync_all_started",
+        extra={"connections_total": len(conns), "user": current_user.username},
+    )
     results = []
 
     for conn in conns:
+        start = time.monotonic()
+        log.info(
+            "sync_started",
+            extra={"connection_id": conn.id, "connection_name": conn.name},
+        )
         try:
             raw_vulns = fetch_all_vulns(
                 conn.indexer_url,
                 conn.wazuh_user,
                 decrypt(conn.wazuh_password),
             )
+            log.info(
+                "sync_fetched",
+                extra={"connection_id": conn.id, "fetched_count": len(raw_vulns)},
+            )
 
             count = process_wazuh_vulnerabilities(db, conn.id, raw_vulns)
             db.commit()
 
+            elapsed_ms = int((time.monotonic() - start) * 1000)
+            log.info(
+                "sync_finished",
+                extra={
+                    "connection_id": conn.id,
+                    "connection_name": conn.name,
+                    "synced_count": count,
+                    "elapsed_ms": elapsed_ms,
+                },
+            )
             results.append({"connection": conn.name, "synced": count, "ok": True})
         except Exception as e:
             db.rollback()
+            log.exception(
+                "sync_failed",
+                extra={"connection_id": conn.id, "connection_name": conn.name},
+            )
             results.append({"connection": conn.name, "ok": False, "error": str(e)})
 
+    log.info("sync_all_finished", extra={"results": results})
     return results
 
 
