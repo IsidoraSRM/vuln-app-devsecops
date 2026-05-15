@@ -1,4 +1,6 @@
-# Guía de Desarrollo Local
+
+# Guía para ejecución Local
+
 
 Esta guía detalla los pasos para ejecutar la aplicación (Frontend y Backend) de forma nativa en tu máquina local para desarrollo, conectándose a una base de datos PostgreSQL local gestionada mediante pgAdmin.
 
