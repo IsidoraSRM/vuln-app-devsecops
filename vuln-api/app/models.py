@@ -85,6 +85,9 @@ class WazuhVulnerability(Base):
         back_populates="vulnerability",
         cascade="all, delete-orphan",
     )
+    
+    # MODIFICACIÓN PARA TIMESCALEDB:
+    # Se incluye 'last_seen' en la restricción única para permitir el particionamiento.
     __table_args__ = (
         UniqueConstraint(
             "connection_id",
@@ -92,6 +95,7 @@ class WazuhVulnerability(Base):
             "package_name",
             "package_version",
             "cve_id",
+            "last_seen", 
             name="uniq_wazuh_vuln",
         ),
     )

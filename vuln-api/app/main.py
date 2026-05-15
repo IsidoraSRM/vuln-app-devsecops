@@ -24,11 +24,51 @@ from .auth import (
 from .models import User, WazuhVulnerability, WazuhConnection, VulnerabilityHistory
 from .wazuh_client import fetch_all_vulns, test_connection
 from .crypto import encrypt, decrypt
+from sqlalchemy import text
 
 configure_logging()
 log = logging.getLogger(__name__)
 
 Base.metadata.create_all(bind=engine)
+
+def setup_timescaledb():
+    """Configura Hypertables y Compresión (Sin borrar datos)."""
+    db = SessionLocal()
+    try:
+        log.info("initializing_timescaledb_features")
+        
+        # 1. Convertir tablas de eventos en Hypertables
+        db.execute(text("SELECT create_hypertable('user_interactions', 'timestamp', if_not_exists => TRUE);"))
+        db.execute(text("SELECT create_hypertable('vulnerability_history', 'timestamp', if_not_exists => TRUE);"))
+
+        # 2. Configurar Compresión (Datos > 7 días)
+        # Esto reduce espacio sin eliminar registros.
+        db.execute(text("""
+            ALTER TABLE vulnerability_history SET (
+                timescaledb.compress,
+                timescaledb.compress_segmentby = 'vulnerability_id'
+            );
+        """))
+        # Agregamos la política solo si no existe una para evitar errores en reinicios
+        db.execute(text("""
+            SELECT add_compression_policy('vulnerability_history', INTERVAL '7 days')
+            WHERE NOT EXISTS (
+                SELECT 1 FROM timescaledb_information.jobs 
+                WHERE proc_name = 'policy_compression' 
+                AND hypertable_name = 'vulnerability_history'
+            );
+        """))
+
+        db.commit()
+        log.info("timescaledb_setup_complete")
+    except Exception as e:
+        log.error(f"Error en setup de TimescaleDB: {e}")
+        db.rollback()
+    finally:
+        db.close()
+
+# Ejecutar configuración de TimescaleDB
+setup_timescaledb()
 
 CONNECTION_NOT_FOUND = "Conexión no encontrada"
 
