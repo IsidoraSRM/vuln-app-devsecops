@@ -48,7 +48,7 @@ class UserInteraction(Base):
     endpoint = Column(String, index=True)
     method = Column(String)
     details = Column(Text, nullable=True)
-    timestamp = Column(DateTime(timezone=True), server_default=func.now())
+    timestamp = Column(DateTime(timezone=True), primary_key=True, server_default=func.now())
     user = relationship("User", back_populates="interactions")
 
 
@@ -109,5 +109,5 @@ class VulnerabilityHistory(Base):
     )
     action = Column(String, nullable=False)
     details = Column(Text, nullable=True)
-    timestamp = Column(DateTime(timezone=True), server_default=func.now())
+    timestamp = Column(DateTime(timezone=True), primary_key=True, server_default=func.now())
     vulnerability = relationship("WazuhVulnerability", back_populates="history")
