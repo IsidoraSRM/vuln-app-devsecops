@@ -4,3 +4,4 @@ import clickOutside from '@/presentation/directives/clickOutside'
 config.global.directives = {
     'click-outside': clickOutside
 }
+// hola sonar
