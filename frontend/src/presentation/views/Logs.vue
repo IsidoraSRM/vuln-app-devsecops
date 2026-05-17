@@ -11,7 +11,8 @@
     </div>
 
     <div class="log-list">
-      <table class="log-table">
+      <table class="log-table" aria-label="Lista de logs">
+        <caption class="table-caption">Últimas entradas de log</caption>
         <thead>
           <tr>
             <th>Timestamp</th>
