@@ -3,7 +3,7 @@ import logging
 import re
 import os
 import time
-from fastapi import FastAPI, Depends, HTTPException
+from fastapi import FastAPI, Depends, HTTPException, Query, BackgroundTasks
 from prometheus_client import Counter, Histogram, make_asgi_app
 from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
 from prometheus_client import CollectorRegistry
@@ -18,7 +18,7 @@ from pydantic import BaseModel
 from sqlalchemy.sql import func
 from .db import Base, engine, get_db, SessionLocal
 from .logging_config import configure_logging
-from .models import User, WazuhVulnerability, WazuhConnection
+from .models import User, WazuhVulnerability, WazuhConnection, VulnerabilityHistory
 from .auth import (
     authenticate_user,
     create_access_token,
@@ -26,10 +26,10 @@ from .auth import (
     hash_password,
     verify_password,
 )
-from .models import User, WazuhVulnerability, WazuhConnection, VulnerabilityHistory
 from .wazuh_client import fetch_all_vulns, test_connection
 from .crypto import encrypt, decrypt
 from sqlalchemy import text
+
 try:
     from opentelemetry import trace
     from opentelemetry.sdk.resources import Resource
@@ -46,6 +46,9 @@ log = logging.getLogger(__name__)
 
 Base.metadata.create_all(bind=engine)
 
+# ==============================================================
+# CONFIGURACIÓN DE MÉTRICAS (PROMETHEUS)
+# ==============================================================
 LOGIN_ATTEMPTS = Counter("login_attempts_total", "Total login attempts")
 LOGIN_SUCCESS = Counter("login_success_total", "Total successful logins")
 LOGIN_FAILURES = Counter("login_failures_total", "Total failed logins")
@@ -65,14 +68,12 @@ def setup_timescaledb():
         db.execute(text("SELECT create_hypertable('vulnerability_history', 'timestamp', if_not_exists => TRUE);"))
 
         # 2. Configurar Compresión (Datos > 7 días)
-        # Esto reduce espacio sin eliminar registros.
         db.execute(text("""
             ALTER TABLE vulnerability_history SET (
                 timescaledb.compress,
                 timescaledb.compress_segmentby = 'vulnerability_id'
             );
         """))
-        # Agregamos la política solo si no existe una para evitar errores en reinicios
         db.execute(text("""
             SELECT add_compression_policy('vulnerability_history', INTERVAL '7 days')
             WHERE NOT EXISTS (
@@ -90,7 +91,6 @@ def setup_timescaledb():
     finally:
         db.close()
 
-# Ejecutar configuración de TimescaleDB
 setup_timescaledb()
 
 CONNECTION_NOT_FOUND = "Conexión no encontrada"
@@ -133,6 +133,7 @@ create_default_admin()
 
 app = FastAPI(title="Vulnerability Aggregator API", root_path="/api")
 
+# Configuración OpenTelemetry
 if OTEL_AVAILABLE:
     resource = Resource.create({"service.name": "vuln-api"})
     trace.set_tracer_provider(TracerProvider(resource=resource))
@@ -174,13 +175,9 @@ def login(
 
 @app.get("/health")
 def health():
-    """Endpoint de salud simple para observabilidad.
-
-    Comprueba conectividad con la base de datos y devuelve un estado resumido.
-    """
+    """Endpoint de salud simple para observabilidad."""
     db = SessionLocal()
     try:
-        
         db.execute(text("SELECT 1"))
         db.close()
         return JSONResponse(status_code=200, content={"status": "ok", "database": "ok"})
@@ -197,8 +194,8 @@ class ChangePasswordRequest(BaseModel):
     new_password: str
     confirm_password: str 
 
+
 def validate_strong_password(password: str) -> None:
-    """Valida que la contraseña sea robusta. Lanza HTTPException si no cumple."""
     errors = []
     if len(password) < 8:
         errors.append("mínimo 8 caracteres")
@@ -215,6 +212,7 @@ def validate_strong_password(password: str) -> None:
             status_code=400,
             detail=f"La contraseña no es suficientemente robusta: {', '.join(errors)}",
         )
+
 
 @app.post("/auth/change-password")
 def change_password(
@@ -257,6 +255,7 @@ def get_user_me(current_user: User = Depends(get_current_user)):
         "is_active": current_user.is_active,
         "is_default_password": current_user.is_default_password,
     }
+
 
 class NewUserRequest(BaseModel):
     username: str
@@ -335,16 +334,11 @@ def create_connection(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    # verify unique name
     if db.query(WazuhConnection).filter(WazuhConnection.name == request.name).first():
-        raise HTTPException(
-            status_code=400, detail="Ya existe una conexión con ese nombre"
-        )
+        raise HTTPException(status_code=400, detail="Ya existe una conexión con ese nombre")
 
-    # try to connect before persisting
     ok = test_connection(request.indexer_url, request.wazuh_user, request.wazuh_password)
     if not ok:
-        # do not store invalid configuration
         raise HTTPException(
             status_code=400,
             detail="No se pudo establecer conexión con el indexador Wazuh",
@@ -421,9 +415,46 @@ def test_wazuh_connection(
     return {"ok": ok, "message": "Conexión exitosa" if ok else "No se pudo conectar"}
 
 
+# ==============================================================
+# LÓGICA DE SINCRONIZACIÓN ASÍNCRONA EN MEMORIA (SOLUCIÓN 504)
+# ==============================================================
+def perform_sync_task(conn_id: int, username: str):
+    """Esta función corre aislada en segundo plano y maneja su propia sesión de BD"""
+    db = SessionLocal()
+    try:
+        conn = db.query(WazuhConnection).filter(WazuhConnection.id == conn_id).first()
+        if not conn or not conn.is_active:
+            return
+
+        log.info("sync_started", extra={"connection_id": conn.id, "connection_name": conn.name, "user": username})
+        start = time.monotonic()
+
+        # 1. Descarga desde Wazuh
+        raw_vulns = fetch_all_vulns(
+            conn.indexer_url, conn.wazuh_user, decrypt(conn.wazuh_password)
+        )
+        
+        # 2. Procesa e inserta usando la memoria RAM
+        count = process_wazuh_vulnerabilities(db, conn.id, raw_vulns)
+        db.commit()
+
+        elapsed_ms = int((time.monotonic() - start) * 1000)
+        
+        # Guardar en Prometheus
+        SYNC_DURATION_MS.observe(elapsed_ms)
+        
+        log.info("sync_finished", extra={"connection_id": conn.id, "synced_count": count, "elapsed_ms": elapsed_ms})
+    except Exception as e:
+        db.rollback()
+        log.exception("sync_failed", extra={"connection_id": conn_id, "error": str(e)})
+    finally:
+        db.close()
+
+
 @app.post("/wazuh-connections/{conn_id}/sync")
 def sync_connection(
     conn_id: int,
+    background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -433,71 +464,35 @@ def sync_connection(
     if not conn.is_active:
         raise HTTPException(status_code=400, detail="La conexión está inactiva")
 
-    log.info(
-        "sync_started",
-        extra={"connection_id": conn.id, "connection_name": conn.name, "user": current_user.username},
-    )
-    start = time.monotonic()
-
-    try:
-        raw_vulns = fetch_all_vulns(
-            conn.indexer_url, conn.wazuh_user, decrypt(conn.wazuh_password)
-        )
-        log.info(
-            "sync_fetched",
-            extra={"connection_id": conn.id, "fetched_count": len(raw_vulns)},
-        )
-
-        count = process_wazuh_vulnerabilities(db, conn.id, raw_vulns)
-        db.commit()
-    except Exception:
-        db.rollback()
-        log.exception(
-            "sync_failed",
-            extra={"connection_id": conn.id, "connection_name": conn.name},
-        )
-        raise HTTPException(status_code=502, detail="Error al sincronizar con Wazuh")
-
-    elapsed_ms = int((time.monotonic() - start) * 1000)
-    log.info(
-        "sync_finished",
-        extra={
-            "connection_id": conn.id,
-            "connection_name": conn.name,
-            "synced_count": count,
-            "elapsed_ms": elapsed_ms,
-        },
-    )
-    return {"synced": count, "connection": conn.name}
+    background_tasks.add_task(perform_sync_task, conn.id, current_user.username)
+    return {"message": "Sincronización iniciada en segundo plano. Esto puede tomar unos minutos."}
 
 
-def _handle_existing_vuln(db: Session, existing: WazuhVulnerability, vuln: dict) -> None:
-    if existing.status == "RESOLVED":
-        existing.status = "ACTIVE"
-        db.add(VulnerabilityHistory(
-            vulnerability_id=existing.id,
-            action="REOPENED",
-            details="La vulnerabilidad fue detectada nuevamente por Wazuh",
-        ))
+@app.post("/vulns/sync-all")
+def sync_all_connections(
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db), 
+    current_user: User = Depends(get_current_user)
+):
+    conns = db.query(WazuhConnection).filter(WazuhConnection.is_active == True).all()
+    for conn in conns:
+        background_tasks.add_task(perform_sync_task, conn.id, current_user.username)
 
-    if existing.severity != vuln.get("severity"):
-        db.add(VulnerabilityHistory(
-            vulnerability_id=existing.id,
-            action="SEVERITY_CHANGED",
-            details=f"Severidad cambió de {existing.severity} a {vuln.get('severity')}",
-        ))
-        existing.severity = vuln.get("severity")
-
-    existing.score_base = (vuln.get("score") or {}).get("base")
-    existing.last_seen = func.now()
+    return {"message": "Sincronización global iniciada en segundo plano."}
 
 
 def process_wazuh_vulnerabilities(db: Session, conn_id: int, raw_vulns: list) -> int:
     count = 0
     seen_vuln_ids = set()
 
-    active_vulns_in_db = db.query(WazuhVulnerability).filter_by(connection_id=conn_id, status="ACTIVE").all()
-    active_vuln_dict = {v.id: v for v in active_vulns_in_db}
+    all_db_vulns = db.query(WazuhVulnerability).filter_by(connection_id=conn_id).all()
+    
+    vuln_map = {
+        (v.agent_id, v.package_name, v.package_version, v.cve_id): v
+        for v in all_db_vulns
+    }
+
+    processed_keys = set() 
 
     for v in raw_vulns:
         agent = v.get("agent", {})
@@ -505,32 +500,66 @@ def process_wazuh_vulnerabilities(db: Session, conn_id: int, raw_vulns: list) ->
         pkg = v.get("package", {})
         vuln = v.get("vulnerability", {})
 
-        if not vuln.get("id"):
+        cve_id = vuln.get("id")
+        if not cve_id:
             continue
 
-        existing = db.query(WazuhVulnerability).filter_by(
-            connection_id=conn_id,
-            agent_id=agent.get("id"),
-            package_name=pkg.get("name"),
-            package_version=pkg.get("version"),
-            cve_id=vuln.get("id"),
-        ).first()
+        agent_id = agent.get("id")
+        pkg_name = pkg.get("name")
+        pkg_version = pkg.get("version")
+
+        key = (agent_id, pkg_name, pkg_version, cve_id)
+        
+        if key in processed_keys:
+            continue
+        processed_keys.add(key)
+
+        existing = vuln_map.get(key)
 
         if existing:
-            seen_vuln_ids.add(existing.id)
-            _handle_existing_vuln(db, existing, vuln)
+            if existing.id:
+                seen_vuln_ids.add(existing.id)
+            _handle_existing_vuln_in_memory(existing, vuln)
         else:
-            new_vuln = _create_new_vuln(db, conn_id, agent, osinfo, pkg, vuln)
-            seen_vuln_ids.add(new_vuln.id)
-
+            new_vuln = _create_new_vuln_in_memory(conn_id, agent, osinfo, pkg, vuln)
+            db.add(new_vuln)
+            vuln_map[key] = new_vuln 
+            
         count += 1
 
-    _resolve_missing_vulns(db, active_vuln_dict, seen_vuln_ids)
+    for key, db_vuln in vuln_map.items():
+        if db_vuln.id and db_vuln.id not in seen_vuln_ids and db_vuln.status == "ACTIVE":
+            db_vuln.status = "RESOLVED"
+            db_vuln.history.append(VulnerabilityHistory(
+                action="RESOLVED",
+                details="Ya no es reportada por el agente (Probablemente parcheada)",
+            ))
+
     return count
 
 
-def _create_new_vuln(db, conn_id, agent, osinfo, pkg, vuln):
-    new_vuln = WazuhVulnerability(
+def _handle_existing_vuln_in_memory(existing: WazuhVulnerability, vuln: dict) -> None:
+    if existing.status == "RESOLVED":
+        existing.status = "ACTIVE"
+        existing.history.append(VulnerabilityHistory(
+            action="REOPENED",
+            details="La vulnerabilidad fue detectada nuevamente por Wazuh",
+        ))
+
+    new_severity = vuln.get("severity")
+    if existing.severity != new_severity:
+        existing.history.append(VulnerabilityHistory(
+            action="SEVERITY_CHANGED",
+            details=f"Severidad cambió de {existing.severity} a {new_severity}",
+        ))
+        existing.severity = new_severity
+
+    existing.score_base = (vuln.get("score") or {}).get("base")
+    existing.last_seen = func.now()
+
+
+def _create_new_vuln_in_memory(conn_id, agent, osinfo, pkg, vuln):
+    new_v = WazuhVulnerability(
         connection_id=conn_id,
         status="ACTIVE",
         agent_id=agent.get("id"),
@@ -552,86 +581,33 @@ def _create_new_vuln(db, conn_id, agent, osinfo, pkg, vuln):
         reference=vuln.get("reference"),
         scanner_vendor=(vuln.get("scanner") or {}).get("vendor"),
     )
-    db.add(new_vuln)
-    db.flush()
-    db.add(VulnerabilityHistory(
-        vulnerability_id=new_vuln.id,
+    new_v.history.append(VulnerabilityHistory(
         action="DETECTED",
         details="Vulnerabilidad identificada por primera vez",
     ))
+    
+    # Reportar a Prometheus
     VULN_DETECTED.inc()
-    return new_vuln
+    
+    return new_v
 
 
-def _resolve_missing_vulns(db, active_vuln_dict, seen_vuln_ids):
-    for vuln_id, db_vuln in active_vuln_dict.items():
-        if vuln_id not in seen_vuln_ids:
-            db_vuln.status = "RESOLVED"
-            db.add(VulnerabilityHistory(
-                vulnerability_id=vuln_id,
-                action="RESOLVED",
-                details="Ya no es reportada por el agente (Probablemente parcheada)",
-            ))
-
-
-@app.post("/vulns/sync-all")
-def sync_all_connections(
-    db: Session = Depends(get_db), current_user: User = Depends(get_current_user)
-):
-    conns = db.query(WazuhConnection).filter(WazuhConnection.is_active == True).all()
-    log.info(
-        "sync_all_started",
-        extra={"connections_total": len(conns), "user": current_user.username},
-    )
-    results = []
-
-    for conn in conns:
-        start = time.monotonic()
-        log.info(
-            "sync_started",
-            extra={"connection_id": conn.id, "connection_name": conn.name},
-        )
-        try:
-            raw_vulns = fetch_all_vulns(
-                conn.indexer_url,
-                conn.wazuh_user,
-                decrypt(conn.wazuh_password),
-            )
-            log.info(
-                "sync_fetched",
-                extra={"connection_id": conn.id, "fetched_count": len(raw_vulns)},
-            )
-
-            count = process_wazuh_vulnerabilities(db, conn.id, raw_vulns)
-            db.commit()
-
-            elapsed_ms = int((time.monotonic() - start) * 1000)
-            log.info(
-                "sync_finished",
-                extra={
-                    "connection_id": conn.id,
-                    "connection_name": conn.name,
-                    "synced_count": count,
-                    "elapsed_ms": elapsed_ms,
-                },
-            )
-            results.append({"connection": conn.name, "synced": count, "ok": True})
-        except Exception as e:
-            db.rollback()
-            log.exception(
-                "sync_failed",
-                extra={"connection_id": conn.id, "connection_name": conn.name},
-            )
-            results.append({"connection": conn.name, "ok": False, "error": str(e)})
-
-    log.info("sync_all_finished", extra={"results": results})
-    return results
-
-
+# ==============================================================
+# ENDPOINT DE PAGINACIÓN Y FILTRADO (SERVER-SIDE)
+# ==============================================================
 @app.get("/vulns")
 def list_vulns(
+    page: int = 1,
     limit: Optional[int] = None,
-    connection_id: int = None,
+    connection_id: Optional[int] = None,
+    agent_name: Optional[List[str]] = Query(None),
+    cve_id: Optional[List[str]] = Query(None),
+    package_name: Optional[List[str]] = Query(None),
+    severity: Optional[List[str]] = Query(None),
+    score_min: Optional[float] = None,
+    score_max: Optional[float] = None,
+    sort_key: Optional[str] = 'last_seen',
+    sort_order: Optional[str] = 'desc',
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -639,13 +615,37 @@ def list_vulns(
     
     if connection_id:
         query = query.filter(WazuhVulnerability.connection_id == connection_id)
+    if agent_name:
+        query = query.filter(WazuhVulnerability.agent_name.in_(agent_name))
+    if cve_id:
+        query = query.filter(WazuhVulnerability.cve_id.in_(cve_id))
+    if package_name:
+        query = query.filter(WazuhVulnerability.package_name.in_(package_name))
+    if severity:
+        query = query.filter(func.upper(WazuhVulnerability.severity).in_([s.upper() for s in severity]))
+    if score_min is not None:
+        query = query.filter(WazuhVulnerability.score_base >= score_min)
+    if score_max is not None:
+        query = query.filter(WazuhVulnerability.score_base <= score_max)
+
+    total_count = query.count()
+
+    if sort_key and hasattr(WazuhVulnerability, sort_key):
+        column = getattr(WazuhVulnerability, sort_key)
+        if sort_order == 'desc':
+            query = query.order_by(column.desc())
+        else:
+            query = query.order_by(column.asc())
+    else:
+        query = query.order_by(WazuhVulnerability.last_seen.desc())
 
     if limit is not None:
-        query = query.limit(limit)
+        skip = (page - 1) * limit
+        query = query.offset(skip).limit(limit)
 
     vulns = query.all()
 
-    return [
+    items = [
         {
             "id": v.id,
             "connection_id": v.connection_id,
@@ -683,3 +683,10 @@ def list_vulns(
         }
         for v in vulns
     ]
+
+    return {
+        "total": total_count,
+        "page": page,
+        "limit": limit if limit is not None else total_count,
+        "items": items
+    }

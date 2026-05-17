@@ -1,3 +1,4 @@
+// src/presentation/views/timeline/useTimelineData.js
 import { computed, ref } from 'vue'
 import vulnService from '../../../application/services/vulnService'
 import { DAY_MS, HOUR_MS, alignHour, fmtDDMM, fmtHour, fmtYear } from './timelineFormatters'
@@ -82,7 +83,7 @@ export default function useTimelineData({
   const getVulnerabilityStateAtTime = (vuln, ms) => {
     const firstSeenMs = new Date(vuln.first_seen).getTime()
     if (Number.isNaN(firstSeenMs) || firstSeenMs > ms) {
-      return null // Vulnerability not yet seen
+      return null
     }
 
     let state = 'ACTIVE'
@@ -183,7 +184,6 @@ export default function useTimelineData({
 
   const getSlotDetails = (snapshot, startMs, endMs) => {
     if (!snapshot) return []
-    // Solo incluir vulnerabilidades que tienen un evento EN este slot específico
     return snapshot.details
       .map(vuln => {
         const timelineEvent = getTimelineEventInSlot(vuln, startMs, endMs)
@@ -194,7 +194,7 @@ export default function useTimelineData({
           timeline_event_source: timelineEvent?.source ?? null
         }
       })
-      .filter(vuln => vuln.timeline_event_at !== null) // Solo vulnerabilidades con eventos reales
+      .filter(vuln => vuln.timeline_event_at !== null)
   }
 
   const createSlot = (startMs, endMs, summary, snapshot, slotHours) => {
@@ -202,7 +202,6 @@ export default function useTimelineData({
     const type = getSlotType(summary)
     const details = getSlotDetails(snapshot, startMs, endMs)
 
-    // Contadores basados en vulnerabilidades con eventos, no en snapshot completo
     const total = details.length
     const pending = details.filter(v => v.status === 'ACTIVE').length
     const resolved = details.filter(v => v.status === 'RESOLVED').length
@@ -238,7 +237,6 @@ export default function useTimelineData({
       const summary = summarizeChanges(startMs, endMs)
       const painted = summary.hasDetection || summary.hasResolution
       
-      // Solo crear slot si hay eventos reales (detecciones o resoluciones)
       if (painted) {
         const snapshot = snapshotAt(endMs)
         slots.push(createSlot(startMs, endMs, summary, snapshot, activeZoom.value.slotHours))
@@ -250,13 +248,15 @@ export default function useTimelineData({
 
   const paintedCount = computed(() => allSlots.value.filter(slot => slot.painted).length)
 
+  // ADAPTADO AL NUEVO PAYLOAD CON PROPIEDAD .items
   const fetchConnectionVulns = async () => {
     const response = await vulnService.getVulns({
       connectionId: selectedConnection.value,
       limit: LIMIT
     })
 
-    const data = Array.isArray(response.data) ? response.data : []
+    const rawData = response.data?.items || response.data || []
+    const data = Array.isArray(rawData) ? rawData : []
 
     if (data.length >= LIMIT) {
       warningMessage.value = `Se alcanzaron ${LIMIT} registros. El analisis puede estar truncado.`
