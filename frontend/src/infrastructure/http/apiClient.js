@@ -1,8 +1,23 @@
 import axios from 'axios';
 import setupAuthInterceptor from './interceptors/authInterceptor';
 
+const rawBase = import.meta.env.VITE_API_URL;
+const baseURL = rawBase ? rawBase.replace('localhost', '127.0.0.1') : 'http://127.0.0.1:8000';
+
 const apiClient = axios.create({
-    baseURL: import.meta.env.VITE_API_URL,
+    baseURL,
+});
+
+
+apiClient.interceptors.request.use((config) => {
+    try {
+        const full = (config.baseURL || '') + (config.url || '');
+        
+        console.debug('[apiClient] request ->', full, config.method, config.headers && config.headers['Content-Type']);
+    } catch (e) {
+        
+    }
+    return config;
 });
 
 setupAuthInterceptor(apiClient);

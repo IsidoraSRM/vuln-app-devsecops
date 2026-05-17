@@ -12,3 +12,8 @@ python-multipart
 pytest
 pytest-cov
 httpx
+prometheus_client
+opentelemetry-sdk
+opentelemetry-instrumentation-fastapi
+opentelemetry-instrumentation-requests
+opentelemetry-exporter-otlp

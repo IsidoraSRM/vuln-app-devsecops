@@ -4,6 +4,11 @@ import re
 import os
 import time
 from fastapi import FastAPI, Depends, HTTPException
+from prometheus_client import Counter, Histogram, make_asgi_app
+from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
+from prometheus_client import CollectorRegistry
+from fastapi.responses import Response
+from fastapi.responses import JSONResponse
 from fastapi.security import OAuth2PasswordRequestForm
 from fastapi.middleware.cors import CORSMiddleware
 from dotenv import set_key, find_dotenv
@@ -25,11 +30,29 @@ from .models import User, WazuhVulnerability, WazuhConnection, VulnerabilityHist
 from .wazuh_client import fetch_all_vulns, test_connection
 from .crypto import encrypt, decrypt
 from sqlalchemy import text
+try:
+    from opentelemetry import trace
+    from opentelemetry.sdk.resources import Resource
+    from opentelemetry.sdk.trace import TracerProvider
+    from opentelemetry.sdk.trace.export import BatchSpanProcessor, ConsoleSpanExporter
+    from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
+    from opentelemetry.instrumentation.requests import RequestsInstrumentor
+    OTEL_AVAILABLE = True
+except Exception:
+    OTEL_AVAILABLE = False
 
 configure_logging()
 log = logging.getLogger(__name__)
 
 Base.metadata.create_all(bind=engine)
+
+LOGIN_ATTEMPTS = Counter("login_attempts_total", "Total login attempts")
+LOGIN_SUCCESS = Counter("login_success_total", "Total successful logins")
+LOGIN_FAILURES = Counter("login_failures_total", "Total failed logins")
+VULN_DETECTED = Counter("vulnerabilities_detected_total", "Total vulnerabilities detected")
+SYNC_DURATION_MS = Histogram("sync_duration_ms", "Sync duration in ms")
+
+metrics_app = make_asgi_app()
 
 def setup_timescaledb():
     """Configura Hypertables y Compresión (Sin borrar datos)."""
@@ -110,6 +133,22 @@ create_default_admin()
 
 app = FastAPI(title="Vulnerability Aggregator API", root_path="/api")
 
+if OTEL_AVAILABLE:
+    resource = Resource.create({"service.name": "vuln-api"})
+    trace.set_tracer_provider(TracerProvider(resource=resource))
+    span_processor = BatchSpanProcessor(ConsoleSpanExporter())
+    trace.get_tracer_provider().add_span_processor(span_processor)
+    try:
+        FastAPIInstrumentor.instrument_app(app)
+        RequestsInstrumentor().instrument()
+        log.info("opentelemetry_instrumentation_enabled")
+    except Exception as e:
+        log.warning(f"opentelemetry_instrumentation_failed: {e}")
+else:
+    log.info("opentelemetry_not_available")
+
+app.mount("/metrics", metrics_app)
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -123,11 +162,34 @@ app.add_middleware(
 def login(
     form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depends(get_db)
 ):
+    LOGIN_ATTEMPTS.inc()
     user = authenticate_user(db, form_data.username, form_data.password)
     if not user:
+        LOGIN_FAILURES.inc()
         raise HTTPException(status_code=400, detail="Usuario o contraseña incorrectos")
+    LOGIN_SUCCESS.inc()
     access_token = create_access_token(data={"sub": user.username})
     return {"access_token": access_token, "token_type": "bearer"}
+
+
+@app.get("/health")
+def health():
+    """Endpoint de salud simple para observabilidad.
+
+    Comprueba conectividad con la base de datos y devuelve un estado resumido.
+    """
+    db = SessionLocal()
+    try:
+        
+        db.execute(text("SELECT 1"))
+        db.close()
+        return JSONResponse(status_code=200, content={"status": "ok", "database": "ok"})
+    except Exception as e:
+        try:
+            db.close()
+        except Exception:
+            pass
+        return JSONResponse(status_code=503, content={"status": "fail", "database": "error", "details": str(e)})
 
 
 class ChangePasswordRequest(BaseModel):
@@ -497,6 +559,7 @@ def _create_new_vuln(db, conn_id, agent, osinfo, pkg, vuln):
         action="DETECTED",
         details="Vulnerabilidad identificada por primera vez",
     ))
+    VULN_DETECTED.inc()
     return new_vuln
 
 
