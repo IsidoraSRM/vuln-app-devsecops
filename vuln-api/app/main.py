@@ -189,6 +189,16 @@ def health():
         return JSONResponse(status_code=503, content={"status": "fail", "database": "error", "details": str(e)})
 
 
+@app.get("/logs")
+def recent_logs(lines: int = 200):
+    """Devuelve las últimas líneas de logs desde el buffer en memoria."""
+    try:
+        from .logging_config import get_recent_logs
+        return {"lines": get_recent_logs(lines)}
+    except Exception as e:
+        return JSONResponse(status_code=500, content={"error": "failed_to_read_logs", "details": str(e)})
+
+
 class ChangePasswordRequest(BaseModel):
     old_password: str
     new_password: str

@@ -2,7 +2,9 @@ import axios from 'axios';
 import setupAuthInterceptor from './interceptors/authInterceptor';
 
 const rawBase = import.meta.env.VITE_API_URL;
-const baseURL = rawBase ? rawBase.replace('localhost', '127.0.0.1') : 'http://127.0.0.1:8000';
+
+const resolved = rawBase ? rawBase.replace('localhost', '127.0.0.1') : 'http://127.0.0.1:8000';
+const baseURL = resolved.endsWith('/api') ? resolved : resolved.replace(/\/$/, '') + '/api';
 
 const apiClient = axios.create({
     baseURL,

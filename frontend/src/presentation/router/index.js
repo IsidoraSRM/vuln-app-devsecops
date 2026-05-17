@@ -5,6 +5,8 @@ import ConfigUser from '../views/ConfigUser.vue'
 import ConfigWazuh from '../views/ConfigWazuh.vue'
 import Timeline from '../views/Timeline.vue'
 import ChangePassword from '../views/ChangePassword.vue'
+import Logs from '../views/Logs.vue'
+import Metrics from '../views/Metrics.vue'
 import NotFound from '../views/NotFound.vue'
 import userService from '../../application/services/userService'
 
@@ -16,6 +18,8 @@ const routes = [
   { path: '/timeline', name: 'Timeline', component: Timeline, meta: { requiresAuth: true } },
   { path: '/config-user', name: 'ConfigUser', component: ConfigUser, meta: { requiresAuth: true } },
   { path: '/config-wazuh', name: 'ConfigWazuh', component: ConfigWazuh, meta: { requiresAuth: true } },
+  { path: '/logs', name: 'Logs', component: Logs, meta: { requiresAuth: true } },
+  { path: '/metrics', name: 'Metrics', component: Metrics, meta: { requiresAuth: true } },
   { path: '/change-password', name: 'ChangePassword', component: ChangePassword, meta: { requiresAuth: true } },
   { path: '/:pathMatch(.*)*', name: 'NotFound', component: NotFound },
 ]
