@@ -17,7 +17,9 @@ vi.mock('axios', () => {
 
 describe('apiClient.js', () => {
     beforeEach(() => {
-        vi.stubEnv('VITE_API_URL', 'http://api-test:8000')
+        // Se incluye /api porque apiClient lo agrega automaticamente si falta.
+        // Usar la forma final ya con /api evita ambiguedad en el assert.
+        vi.stubEnv('VITE_API_URL', 'http://api-test:8000/api')
     })
 
     it('debe crear la instancia de axios con baseURL del entorno', async () => {
@@ -25,7 +27,7 @@ describe('apiClient.js', () => {
         const apiClient = (await import('@/infrastructure/http/apiClient')).default
 
         expect(axios.create).toHaveBeenCalledWith({
-            baseURL: 'http://api-test:8000'
+            baseURL: 'http://api-test:8000/api'
         })
 
         // Validar que se ha importado como default

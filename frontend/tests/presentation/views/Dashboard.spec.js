@@ -4,6 +4,12 @@ import Dashboard from '@/presentation/views/Dashboard.vue'
 import vulnService from '@/application/services/vulnService'
 import wazuhService from '@/application/services/wazuhService'
 
+// Helper: envuelve un array en la forma paginada server-side que el backend
+// devuelve ahora ({ data: { items, total } }) tras el refactor de paginacion.
+const paginated = (items, total = null) => ({
+    data: { items, total: total ?? items.length }
+})
+
 vi.mock('@/application/services/vulnService', () => ({
     default: {
         getVulns: vi.fn(),
@@ -50,7 +56,7 @@ describe('Dashboard.vue', () => {
     })
 
     it('renders loading state initially and then shows vulns', async () => {
-        vulnService.getVulns.mockResolvedValueOnce({ data: mockVulns })
+        vulnService.getVulns.mockResolvedValue(paginated(mockVulns))
         const wrapper = mount(Dashboard)
 
         // Check loading indicator (might be hard to grab if it disappears instantly, but initially loading is true)
@@ -60,7 +66,8 @@ describe('Dashboard.vue', () => {
         await flushPromises()
 
         expect(wrapper.vm.loading).toBe(false)
-        expect(vulnService.getVulns).toHaveBeenCalledTimes(1)
+        // onMounted dispara 2 llamadas: fetchVulns + fetchFilterOptionsData (paginacion server-side)
+        expect(vulnService.getVulns).toHaveBeenCalledTimes(2)
         expect(wrapper.vm.vulns.length).toBe(2)
 
         // Check if table rendered with correct number of rows (excluding header)
@@ -72,7 +79,7 @@ describe('Dashboard.vue', () => {
     })
 
     it('injects mock data when getVulns fails', async () => {
-        vulnService.getVulns.mockRejectedValueOnce(new Error('Network error'))
+        vulnService.getVulns.mockRejectedValue(new Error('Network error'))
         const wrapper = mount(Dashboard)
 
         await flushPromises()
@@ -82,24 +89,26 @@ describe('Dashboard.vue', () => {
     })
 
     it('syncs vulns correctly', async () => {
-        vulnService.getVulns.mockResolvedValue({ data: mockVulns })
+        vulnService.getVulns.mockResolvedValue(paginated(mockVulns))
         vulnService.syncVulns.mockResolvedValueOnce({})
 
         const wrapper = mount(Dashboard)
         await flushPromises() // Wait for initial fetch
 
-        expect(vulnService.getVulns).toHaveBeenCalledTimes(1)
+        // onMounted dispara 2 llamadas iniciales
+        expect(vulnService.getVulns).toHaveBeenCalledTimes(2)
 
         // Trigger sync
         await wrapper.vm.syncVulns()
 
         expect(wrapper.vm.syncing).toBe(false)
         expect(vulnService.syncVulns).toHaveBeenCalledTimes(1)
-        expect(vulnService.getVulns).toHaveBeenCalledTimes(2) // Fetches again after sync
+        // sync re-dispara fetchFilterOptionsData + fetchVulns: total = 2 (mount) + 2 (sync) = 4
+        expect(vulnService.getVulns).toHaveBeenCalledTimes(4)
     })
 
     it('shows error when sync fails', async () => {
-        vulnService.getVulns.mockResolvedValue({ data: mockVulns })
+        vulnService.getVulns.mockResolvedValue(paginated(mockVulns))
         vulnService.syncVulns.mockRejectedValueOnce(new Error('Sync error'))
 
         const wrapper = mount(Dashboard)
@@ -111,7 +120,7 @@ describe('Dashboard.vue', () => {
     })
 
     it('toggles filters visibility', async () => {
-        vulnService.getVulns.mockResolvedValueOnce({ data: mockVulns })
+        vulnService.getVulns.mockResolvedValue(paginated(mockVulns))
         const wrapper = mount(Dashboard)
         await flushPromises()
 
@@ -124,7 +133,11 @@ describe('Dashboard.vue', () => {
         expect(wrapper.vm.showFilters).toBe(true)
     })
 
-    it('filters vulnerabilities by selected agent', async () => {
+    // Skip: 'sortedVulns' computed era client-side y fue removido en el refactor
+    // de paginacion server-side. Los filtros ahora los aplica el backend
+    // (parametros en vulnService.getVulns). Test pendiente de reescribirse para
+    // verificar que se llama al backend con los filtros correctos.
+    it.skip('filters vulnerabilities by selected agent', async () => {
         vulnService.getVulns.mockResolvedValueOnce({ data: mockVulns })
         const wrapper = mount(Dashboard)
         await flushPromises()
@@ -138,7 +151,7 @@ describe('Dashboard.vue', () => {
 
 
     it('sorts vulnerabilities on header click', async () => {
-        vulnService.getVulns.mockResolvedValueOnce({ data: mockVulns })
+        vulnService.getVulns.mockResolvedValue(paginated(mockVulns))
         const wrapper = mount(Dashboard)
         await flushPromises()
 
@@ -161,7 +174,8 @@ describe('Dashboard.vue', () => {
         expect(wrapper.vm.sortKey).toBe('')
     })
 
-    it('filters vulnerabilities by selected severity', async () => {
+    // Skip: 'sortedVulns' removido en refactor server-side. Filtro se aplica en backend.
+    it.skip('filters vulnerabilities by selected severity', async () => {
         vulnService.getVulns.mockResolvedValueOnce({ data: mockVulns })
         const wrapper = mount(Dashboard)
         await flushPromises()
@@ -173,7 +187,8 @@ describe('Dashboard.vue', () => {
         expect(wrapper.vm.sortedVulns[0].severity).toBe('critical')
     })
 
-    it('filters vulnerabilities by selected cve', async () => {
+    // Skip: 'sortedVulns' removido en refactor server-side. Filtro se aplica en backend.
+    it.skip('filters vulnerabilities by selected cve', async () => {
         vulnService.getVulns.mockResolvedValueOnce({ data: mockVulns })
         const wrapper = mount(Dashboard)
         await flushPromises()
@@ -185,7 +200,8 @@ describe('Dashboard.vue', () => {
         expect(wrapper.vm.sortedVulns[0].cve_id).toBe('CVE-2023-1234')
     })
 
-    it('filters vulnerabilities by selected package', async () => {
+    // Skip: 'sortedVulns' removido en refactor server-side. Filtro se aplica en backend.
+    it.skip('filters vulnerabilities by selected package', async () => {
         vulnService.getVulns.mockResolvedValueOnce({ data: mockVulns })
         const wrapper = mount(Dashboard)
         await flushPromises()
@@ -198,7 +214,7 @@ describe('Dashboard.vue', () => {
     })
 
     it('clears filters correctly', async () => {
-        vulnService.getVulns.mockResolvedValueOnce({ data: mockVulns })
+        vulnService.getVulns.mockResolvedValue(paginated(mockVulns))
         const wrapper = mount(Dashboard)
         await flushPromises()
 
@@ -222,8 +238,8 @@ describe('Dashboard.vue', () => {
         expect(wrapper.vm.scoreMax).toBe('')
     })
 
-    it('covers empty vulns, loads connections, isNew and severity badge branches', async () => {
-        vulnService.getVulns.mockResolvedValueOnce({ data: [] })
+    it('covers empty vulns, loads connections, and severity badge branches', async () => {
+        vulnService.getVulns.mockResolvedValue(paginated([]))
         wazuhService.getConnections.mockResolvedValueOnce({
             data: [
                 { id: 1, name: 'Conn A' },
@@ -234,23 +250,16 @@ describe('Dashboard.vue', () => {
         const wrapper = mount(Dashboard)
         await flushPromises()
 
-        // line 607: when vulns API returns empty
+        // when vulns API returns empty
         expect(wrapper.vm.vulns).toEqual([])
 
-        // line 619: connections assigned
+        // connections assigned
         expect(wrapper.vm.connections).toEqual([
             { id: 1, name: 'Conn A' },
             { id: 2, name: 'Conn B' }
         ])
 
-        // lines 648-653
-        expect(wrapper.vm.isNew(null)).toBe(false)
-        expect(wrapper.vm.isNew(new Date().toISOString())).toBe(true)
-        expect(
-            wrapper.vm.isNew(new Date(Date.now() - 1000 * 60 * 60 * 48).toISOString())
-        ).toBe(false)
-
-        // lines 665-669
+        // severity badge branches (isNew removido en refactor)
         expect(wrapper.vm.getSeverityBadgeClass('critical')).toBe('badge-critical')
         expect(wrapper.vm.getSeverityBadgeClass('critica')).toBe('badge-critical')
         expect(wrapper.vm.getSeverityBadgeClass('high')).toBe('badge-high')
@@ -261,7 +270,7 @@ describe('Dashboard.vue', () => {
     })
 
     it('clears dependent filters on connection change', async () => {
-        vulnService.getVulns.mockResolvedValueOnce({ data: mockVulns })
+        vulnService.getVulns.mockResolvedValue(paginated(mockVulns))
         wazuhService.getConnections.mockResolvedValueOnce({
             data: [{ id: 1, name: 'Conn A' }]
         })
@@ -287,7 +296,9 @@ describe('Dashboard.vue', () => {
         expect(wrapper.vm.scoreMax).toBe('')
     })
 
-    it('filters vulnerabilities by maximum score', async () => {
+    // Skip: 'sortedVulns' removido en refactor server-side. El filtro por score
+    // ahora se aplica en el backend via score_min/score_max en getVulns.
+    it.skip('filters vulnerabilities by maximum score', async () => {
         const mockVulnsWithScore = [
             {
                 id: 1,
@@ -342,7 +353,8 @@ describe('Dashboard.vue', () => {
             score_base: (i % 10) + 1
         }))
 
-        vulnService.getVulns.mockResolvedValueOnce({ data: manyVulns })
+        // 500 total via paginacion server-side; totalPages = ceil(500/50) = 10
+        vulnService.getVulns.mockResolvedValue(paginated(manyVulns, 500))
         wazuhService.getConnections.mockResolvedValueOnce({ data: [] })
 
         const wrapper = mount(Dashboard)
@@ -416,7 +428,8 @@ describe('Dashboard.vue', () => {
             score_base: 3
         }))
 
-        vulnService.getVulns.mockResolvedValueOnce({ data: fewVulns })
+        // 120 total via paginacion server-side; totalPages = ceil(120/50) = 3
+        vulnService.getVulns.mockResolvedValue(paginated(fewVulns, 120))
         wazuhService.getConnections.mockResolvedValueOnce({ data: [] })
 
         const wrapper = mount(Dashboard)
@@ -427,7 +440,7 @@ describe('Dashboard.vue', () => {
     })
 
     it('formatDate returns formatted and N/A', async () => {
-        vulnService.getVulns.mockResolvedValueOnce({ data: [] })
+        vulnService.getVulns.mockResolvedValue(paginated([]))
         const wrapper = mount(Dashboard)
         await flushPromises()
         expect(wrapper.vm.formatDate(null)).toBe('N/A')
@@ -435,7 +448,7 @@ describe('Dashboard.vue', () => {
     })
 
     it('timeAgo returns all branches', async () => {
-        vulnService.getVulns.mockResolvedValueOnce({ data: [] })
+        vulnService.getVulns.mockResolvedValue(paginated([]))
         const wrapper = mount(Dashboard)
         await flushPromises()
         const now = new Date()
@@ -449,7 +462,7 @@ describe('Dashboard.vue', () => {
     })
 
     it('getTimelineProgress returns 0, normal, min/max', async () => {
-        vulnService.getVulns.mockResolvedValueOnce({ data: [] })
+        vulnService.getVulns.mockResolvedValue(paginated([]))
         const wrapper = mount(Dashboard)
         await flushPromises()
         expect(wrapper.vm.getTimelineProgress({})).toBe(0)
@@ -463,7 +476,7 @@ describe('Dashboard.vue', () => {
     })
 
     it('isRecentlySeen returns true/false/null', async () => {
-        vulnService.getVulns.mockResolvedValueOnce({ data: [] })
+        vulnService.getVulns.mockResolvedValue(paginated([]))
         const wrapper = mount(Dashboard)
         await flushPromises()
         expect(wrapper.vm.isRecentlySeen(null)).toBe(false)
@@ -474,7 +487,7 @@ describe('Dashboard.vue', () => {
     })
 
     it('getSeverityClass returns all branches', async () => {
-        vulnService.getVulns.mockResolvedValueOnce({ data: [] })
+        vulnService.getVulns.mockResolvedValue(paginated([]))
         const wrapper = mount(Dashboard)
         await flushPromises()
         expect(wrapper.vm.getSeverityClass(null)).toBe('badge badge-low')
@@ -492,7 +505,7 @@ describe('Dashboard.vue', () => {
             { agent_name: 'Agent-1', cve_id: 'CVE-1', package_name: 'pkg1', severity: 'critical' },
             { agent_name: 'Agent-2', cve_id: 'CVE-2', package_name: 'pkg2', severity: 'low' }
         ]
-        vulnService.getVulns.mockResolvedValueOnce({ data: mockVulns })
+        vulnService.getVulns.mockResolvedValue(paginated(mockVulns))
         const wrapper = mount(Dashboard)
         await flushPromises()
         wrapper.vm.search.agent = 'Agent-1'
@@ -503,7 +516,9 @@ describe('Dashboard.vue', () => {
         expect(wrapper.vm.filteredPackages.length).toBe(1)
     })
 
-    it('score filter min only, max only, both', async () => {
+    // Skip: 'sortedVulns' removido en refactor server-side. Filtro de score
+    // se aplica en el backend via score_min/score_max.
+    it.skip('score filter min only, max only, both', async () => {
         const mockVulns = [
             { score_base: 2 },
             { score_base: 5 },
@@ -525,7 +540,9 @@ describe('Dashboard.vue', () => {
         expect(wrapper.vm.sortedVulns.length).toBe(1)
     })
 
-    it('sortBy with empty sortKey returns default order', async () => {
+    // Skip: 'sortedVulns' removido en refactor server-side. El sort se aplica
+    // en el backend via sort_key/sort_order.
+    it.skip('sortBy with empty sortKey returns default order', async () => {
         const mockVulns = [
             { agent_name: 'A', last_seen: '2026-03-08T12:00:00Z' },
             { agent_name: 'B', last_seen: '2026-03-08T13:00:00Z' }
@@ -545,7 +562,7 @@ describe('Dashboard.vue', () => {
         const mockVulns = [
             { agent_name: 'Agent-1', cve_id: 'CVE-1', package_name: 'pkg1', severity: 'critical' }
         ]
-        vulnService.getVulns.mockResolvedValueOnce({ data: mockVulns })
+        vulnService.getVulns.mockResolvedValue(paginated(mockVulns))
         const wrapper = mount(Dashboard)
         await flushPromises()
         wrapper.vm.dropdowns.agents = true
@@ -570,7 +587,7 @@ describe('Dashboard.vue', () => {
 
     describe('getSeverityLevel utility function', () => {
         it('returns null/undefined handling', async () => {
-            vulnService.getVulns.mockResolvedValueOnce({ data: [] })
+            vulnService.getVulns.mockResolvedValue(paginated([]))
             const wrapper = mount(Dashboard)
             await flushPromises()
 
@@ -580,7 +597,7 @@ describe('Dashboard.vue', () => {
         })
 
         it('returns correct level for critical severity', async () => {
-            vulnService.getVulns.mockResolvedValueOnce({ data: [] })
+            vulnService.getVulns.mockResolvedValue(paginated([]))
             const wrapper = mount(Dashboard)
             await flushPromises()
 
@@ -592,7 +609,7 @@ describe('Dashboard.vue', () => {
         })
 
         it('returns correct level for high severity', async () => {
-            vulnService.getVulns.mockResolvedValueOnce({ data: [] })
+            vulnService.getVulns.mockResolvedValue(paginated([]))
             const wrapper = mount(Dashboard)
             await flushPromises()
 
@@ -603,7 +620,7 @@ describe('Dashboard.vue', () => {
         })
 
         it('returns correct level for medium severity', async () => {
-            vulnService.getVulns.mockResolvedValueOnce({ data: [] })
+            vulnService.getVulns.mockResolvedValue(paginated([]))
             const wrapper = mount(Dashboard)
             await flushPromises()
 
@@ -614,7 +631,7 @@ describe('Dashboard.vue', () => {
         })
 
         it('returns default level for low and unknown', async () => {
-            vulnService.getVulns.mockResolvedValueOnce({ data: [] })
+            vulnService.getVulns.mockResolvedValue(paginated([]))
             const wrapper = mount(Dashboard)
             await flushPromises()
 
@@ -626,14 +643,17 @@ describe('Dashboard.vue', () => {
         })
     })
 
-    describe('compareValues utility function', () => {
+    // Skip: 'compareValues' era helper client-side de sort y fue removido en
+    // el refactor de paginacion server-side. El sort se delega al backend
+    // via parametros sort_key/sort_order. Bloque pendiente de reescribirse.
+    describe.skip('compareValues utility function', () => {
         beforeEach(() => {
             vi.clearAllMocks()
             wazuhService.getConnections.mockResolvedValue({ data: [] })
         })
 
         it('compares date fields (first_seen, last_seen)', async () => {
-            vulnService.getVulns.mockResolvedValueOnce({ data: [] })
+            vulnService.getVulns.mockResolvedValue(paginated([]))
             const wrapper = mount(Dashboard)
             await flushPromises()
 
@@ -649,7 +669,7 @@ describe('Dashboard.vue', () => {
         })
 
         it('handles null dates in comparison', async () => {
-            vulnService.getVulns.mockResolvedValueOnce({ data: [] })
+            vulnService.getVulns.mockResolvedValue(paginated([]))
             const wrapper = mount(Dashboard)
             await flushPromises()
 
@@ -661,7 +681,7 @@ describe('Dashboard.vue', () => {
         })
 
         it('compares severity levels', async () => {
-            vulnService.getVulns.mockResolvedValueOnce({ data: [] })
+            vulnService.getVulns.mockResolvedValue(paginated([]))
             const wrapper = mount(Dashboard)
             await flushPromises()
 
@@ -673,7 +693,7 @@ describe('Dashboard.vue', () => {
         })
 
         it('compares string fields case-insensitively', async () => {
-            vulnService.getVulns.mockResolvedValueOnce({ data: [] })
+            vulnService.getVulns.mockResolvedValue(paginated([]))
             const wrapper = mount(Dashboard)
             await flushPromises()
 
@@ -685,7 +705,7 @@ describe('Dashboard.vue', () => {
         })
 
         it('handles null/undefined string values', async () => {
-            vulnService.getVulns.mockResolvedValueOnce({ data: [] })
+            vulnService.getVulns.mockResolvedValue(paginated([]))
             const wrapper = mount(Dashboard)
             await flushPromises()
 
@@ -696,7 +716,7 @@ describe('Dashboard.vue', () => {
         })
 
         it('compares numeric fields', async () => {
-            vulnService.getVulns.mockResolvedValueOnce({ data: [] })
+            vulnService.getVulns.mockResolvedValue(paginated([]))
             const wrapper = mount(Dashboard)
             await flushPromises()
 
@@ -708,7 +728,10 @@ describe('Dashboard.vue', () => {
         })
     })
 
-    describe('Filter matching functions', () => {
+    // Skip: matchesConnection/Agent/Vuln/Package/Severity/Score eran helpers
+    // client-side de filtrado y fueron removidos en el refactor server-side.
+    // Los filtros ahora se aplican en el backend via parametros en getVulns.
+    describe.skip('Filter matching functions', () => {
         const mockVulns = [
             {
                 id: 1,
@@ -867,7 +890,7 @@ describe('Dashboard.vue', () => {
                 { agent_name: 'Agent-2', cve_id: 'CVE-2', package_name: 'pkg2', severity: 'low' },
                 { agent_name: 'Agent-1', cve_id: 'CVE-3', package_name: 'pkg3', severity: 'medium' }
             ]
-            vulnService.getVulns.mockResolvedValueOnce({ data: vulnsWithAgents })
+            vulnService.getVulns.mockResolvedValue(paginated(vulnsWithAgents))
             const wrapper = mount(Dashboard)
             await flushPromises()
 
@@ -879,7 +902,7 @@ describe('Dashboard.vue', () => {
                 { agent_name: 'A1', cve_id: 'CVE-2023-1234', package_name: 'pkg1', severity: 'critical' },
                 { agent_name: 'A2', cve_id: 'CVE-2022-0001', package_name: 'pkg2', severity: 'low' }
             ]
-            vulnService.getVulns.mockResolvedValueOnce({ data: vulnsWithCVE })
+            vulnService.getVulns.mockResolvedValue(paginated(vulnsWithCVE))
             const wrapper = mount(Dashboard)
             await flushPromises()
 
@@ -891,7 +914,7 @@ describe('Dashboard.vue', () => {
                 { agent_name: 'A1', cve_id: 'CVE-1', package_name: 'bash', severity: 'critical' },
                 { agent_name: 'A2', cve_id: 'CVE-2', package_name: 'curl', severity: 'low' }
             ]
-            vulnService.getVulns.mockResolvedValueOnce({ data: vulnsWithPackages })
+            vulnService.getVulns.mockResolvedValue(paginated(vulnsWithPackages))
             const wrapper = mount(Dashboard)
             await flushPromises()
 
@@ -904,7 +927,7 @@ describe('Dashboard.vue', () => {
                 { agent_name: 'Agent-2', cve_id: undefined, package_name: 'pkg2', severity: 'low' },
                 { agent_name: 'Agent-3', cve_id: 'CVE-3', package_name: null, severity: 'medium' }
             ]
-            vulnService.getVulns.mockResolvedValueOnce({ data: vulnsWithMissing })
+            vulnService.getVulns.mockResolvedValue(paginated(vulnsWithMissing))
             const wrapper = mount(Dashboard)
             await flushPromises()
 
@@ -920,7 +943,7 @@ describe('Dashboard.vue', () => {
                 { agent_name: 'A3', cve_id: 'CVE-3', package_name: 'pkg3', severity: 'medium' },
                 { agent_name: 'A4', cve_id: 'CVE-4', package_name: 'pkg4', severity: 'high' }
             ]
-            vulnService.getVulns.mockResolvedValueOnce({ data: vulnsWithSeverity })
+            vulnService.getVulns.mockResolvedValue(paginated(vulnsWithSeverity))
             const wrapper = mount(Dashboard)
             await flushPromises()
 
@@ -935,7 +958,7 @@ describe('Dashboard.vue', () => {
             const vulnsWithLowerSeverity = [
                 { agent_name: 'A1', cve_id: 'CVE-1', package_name: 'pkg1', severity: 'critical' }
             ]
-            vulnService.getVulns.mockResolvedValueOnce({ data: vulnsWithLowerSeverity })
+            vulnService.getVulns.mockResolvedValue(paginated(vulnsWithLowerSeverity))
             const wrapper = mount(Dashboard)
             await flushPromises()
 
@@ -943,9 +966,12 @@ describe('Dashboard.vue', () => {
         })
     })
 
-    describe('isNew utility function', () => {
+    // Skip: 'isNew' era helper client-side para marcar vulns recientes y
+    // fue removido en el refactor. El backend ya marca recencia con
+    // first_seen/last_seen. Bloque pendiente de reescribirse si se reintroduce.
+    describe.skip('isNew utility function', () => {
         it('returns false for null/undefined dates', async () => {
-            vulnService.getVulns.mockResolvedValueOnce({ data: [] })
+            vulnService.getVulns.mockResolvedValue(paginated([]))
             const wrapper = mount(Dashboard)
             await flushPromises()
 
@@ -954,7 +980,7 @@ describe('Dashboard.vue', () => {
         })
 
         it('returns true for dates within last 24 hours', async () => {
-            vulnService.getVulns.mockResolvedValueOnce({ data: [] })
+            vulnService.getVulns.mockResolvedValue(paginated([]))
             const wrapper = mount(Dashboard)
             await flushPromises()
 
@@ -963,7 +989,7 @@ describe('Dashboard.vue', () => {
         })
 
         it('returns true for dates 24 hours ago (boundary)', async () => {
-            vulnService.getVulns.mockResolvedValueOnce({ data: [] })
+            vulnService.getVulns.mockResolvedValue(paginated([]))
             const wrapper = mount(Dashboard)
             await flushPromises()
 
@@ -972,7 +998,7 @@ describe('Dashboard.vue', () => {
         })
 
         it('returns false for dates older than 24 hours', async () => {
-            vulnService.getVulns.mockResolvedValueOnce({ data: [] })
+            vulnService.getVulns.mockResolvedValue(paginated([]))
             const wrapper = mount(Dashboard)
             await flushPromises()
 
@@ -981,7 +1007,7 @@ describe('Dashboard.vue', () => {
         })
 
         it('handles edge case of exactly 1 day', async () => {
-            vulnService.getVulns.mockResolvedValueOnce({ data: [] })
+            vulnService.getVulns.mockResolvedValue(paginated([]))
             const wrapper = mount(Dashboard)
             await flushPromises()
 
@@ -989,7 +1015,7 @@ describe('Dashboard.vue', () => {
             expect(wrapper.vm.isNew(date.toISOString())).toBe(true)
         })
         it('covers additional edge cases and template functions', async () => {
-            vulnService.getVulns.mockResolvedValueOnce({ data: [] })
+            vulnService.getVulns.mockResolvedValue(paginated([]))
             wazuhService.getConnections.mockRejectedValueOnce(new Error('Fetch error'))
 
             const wrapper = mount(Dashboard, { attachTo: document.body })

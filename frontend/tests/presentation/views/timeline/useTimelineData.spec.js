@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { ref } from 'vue'
 import useTimelineData from '@/presentation/views/timeline/useTimelineData'
 import vulnService from '@/application/services/vulnService'
@@ -16,6 +16,11 @@ describe('useTimelineData', () => {
 
   beforeEach(() => {
     vi.clearAllMocks()
+    // Congelamos el reloj en la ventana de los datos de prueba para que el
+    // filtro de period ('7d', '24h', ...) caiga sobre los eventos hardcodeados
+    // y no sobre "hoy". shouldAdvanceTime mantiene async/await funcional.
+    vi.useFakeTimers({ shouldAdvanceTime: true })
+    vi.setSystemTime(new Date('2026-03-08T18:00:00Z'))
 
     mockVulnData = [
       {
@@ -52,6 +57,10 @@ describe('useTimelineData', () => {
     }
 
     timeline = useTimelineData(defaultProps)
+  })
+
+  afterEach(() => {
+    vi.useRealTimers()
   })
 
   describe('build function', () => {
