@@ -332,8 +332,8 @@
           <div class="shield-box">
              <svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="var(--success)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path><path d="M9 12l2 2 4-4"></path></svg>
           </div>
-          <p style="color: var(--text-main); font-weight: 500; font-size: 1.1rem; margin-bottom: 0.5rem;">No hay conexiones activas</p>
-          <p style="color: var(--text-muted); font-size: 0.9rem;">El sistema no reporta conexiones activas actualmente.</p>
+          <p style="color: var(--text-main); font-weight: 500; font-size: 1.1rem; margin-bottom: 0.5rem;">No se encontraron vulnerabilidades</p>
+          <p style="color: var(--text-muted); font-size: 0.9rem;">Si recién forzaste la sincronización, recuerda que el proceso puede tomar un par de minutos en descargar todas las vulnerabilidades en segundo plano. Recarga la página en unos instantes.</p>
         </div>
       </div>
     </div>

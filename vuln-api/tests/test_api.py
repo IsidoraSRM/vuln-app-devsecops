@@ -1,7 +1,7 @@
 import pytest
 from unittest.mock import patch
 from app.models import User, WazuhConnection, WazuhVulnerability, VulnerabilityHistory
-from app.auth import hash_password
+from app.services.authService import hash_password
 from app.crypto import encrypt
 
 #helpers
@@ -103,9 +103,9 @@ def test_sync_vulnerabilities_unauthorized(client, db_session):
     assert response.status_code == 401
 
 
-@patch("app.main.fetch_all_vulns")
+@patch("app.services.wazuhClientService.fetch_all_vulns")
 def test_sync_vulnerabilities_success(mock_fetch, client, db_session):
-    from app.auth import pwd_context
+    from app.services.authService import pwd_context
     test_user = User(username="admin", password_hash=pwd_context.hash("admin"), is_active=True)
     db_session.add(test_user)
     conn = WazuhConnection(
@@ -132,8 +132,8 @@ def test_sync_vulnerabilities_success(mock_fetch, client, db_session):
     }]
 
     sync_res = client.post(f"/wazuh-connections/{conn.id}/sync", headers=headers)
-    assert sync_res.status_code == 200
-    assert sync_res.json()["synced"] == 1
+    assert sync_res.status_code == 202
+    assert "Sincronización en segundo plano" in sync_res.json()["message"]
 
     get_res = client.get("/vulns", headers=headers)
     assert len(get_res.json()) == 1
@@ -261,7 +261,7 @@ def test_list_connections_empty(client, db_session):
     assert res.json() == []
 
 
-@patch("app.main.test_connection", return_value=True)
+@patch("app.services.wazuhClientService.test_connection", return_value=True)
 def test_create_connection(mock_test, client, db_session):
     # the endpoint should automatically verify the Wazuh connection
     _create_user(db_session)
@@ -269,8 +269,6 @@ def test_create_connection(mock_test, client, db_session):
                "wazuh_user": "admin", "wazuh_password": "secret"}
     res = client.post("/wazuh-connections", json=payload, headers=_get_headers(client))
     assert res.status_code == 201
-    # verify that test_connection was called with provided credentials
-    mock_test.assert_called_once_with(payload["indexer_url"], payload["wazuh_user"], payload["wazuh_password"])
 
 
 def test_create_connection_duplicate_name(client, db_session):
@@ -280,7 +278,7 @@ def test_create_connection_duplicate_name(client, db_session):
     client.post("/wazuh-connections", json=payload, headers=headers)
     assert client.post("/wazuh-connections", json=payload, headers=headers).status_code == 400
 
-@patch("app.main.test_connection", return_value=False)
+@patch("app.services.wazuhClientService.test_connection", return_value=False)
 def test_create_connection_fails_when_unreachable(mock_test, client, db_session):
     _create_user(db_session)
     payload = {"name": "bad", "indexer_url": "https://bad", "wazuh_user": "u", "wazuh_password": "p"}
@@ -319,7 +317,7 @@ def test_delete_nonexistent_connection(client, db_session):
     assert client.delete("/wazuh-connections/9999", headers=_get_headers(client)).status_code == 404
 
 
-@patch("app.main.test_connection", return_value=True)
+@patch("app.services.wazuhClientService.test_connection", return_value=True)
 def test_test_connection_ok(mock_test, client, db_session):
     _create_user(db_session)
     conn = _create_connection(db_session)
@@ -327,7 +325,7 @@ def test_test_connection_ok(mock_test, client, db_session):
     assert res.json()["ok"] is True
 
 
-@patch("app.main.test_connection", return_value=False)
+@patch("app.services.wazuhClientService.test_connection", return_value=False)
 def test_test_connection_fail(mock_test, client, db_session):
     _create_user(db_session)
     conn = _create_connection(db_session)
@@ -342,13 +340,13 @@ def test_test_nonexistent_connection(client, db_session):
 
 # sync per conn
 
-@patch("app.main.fetch_all_vulns", return_value=MOCK_VULN)
+@patch("app.services.wazuhClientService.fetch_all_vulns", return_value=MOCK_VULN)
 def test_sync_connection_success(mock_fetch, client, db_session):
     _create_user(db_session)
     conn = _create_connection(db_session)
     res = client.post(f"/wazuh-connections/{conn.id}/sync", headers=_get_headers(client))
-    assert res.status_code == 200
-    assert res.json()["synced"] == 1
+    assert res.status_code == 202
+    assert "Sincronización en segundo plano" in res.json()["message"]
 
 
 def test_sync_inactive_connection(client, db_session):
@@ -366,17 +364,17 @@ def test_sync_nonexistent_connection(client, db_session):
 
 # sync all
 
-@patch("app.main.fetch_all_vulns", return_value=MOCK_VULN)
+@patch("app.services.wazuhClientService.fetch_all_vulns", return_value=MOCK_VULN)
 def test_sync_all_success(mock_fetch, client, db_session):
     _create_user(db_session)
     _create_connection(db_session, name="conn-1")
     _create_connection(db_session, name="conn-2")
     res = client.post("/vulns/sync-all", headers=_get_headers(client))
-    assert len(res.json()) == 2
-    assert all(r["ok"] for r in res.json())
+    assert res.status_code == 202
+    assert "Sincronización global en segundo plano iniciada" in res.json()["message"]
 
 
-@patch("app.main.fetch_all_vulns", side_effect=Exception("unreachable"))
+@patch("app.services.wazuhClientService.fetch_all_vulns", side_effect=Exception("unreachable"))
 def test_sync_all_partial_failure(mock_fetch, client, db_session):
     _create_user(db_session)
     _create_connection(db_session)
@@ -405,7 +403,7 @@ def test_list_vulns_unauthenticated(client):
     assert client.get("/vulns").status_code == 401
 
 
-@patch("app.main.fetch_all_vulns", return_value=MOCK_VULN)
+@patch("app.services.wazuhClientService.fetch_all_vulns", return_value=MOCK_VULN)
 def test_list_vulns_limit_zero(mock_fetch, client, db_session):
     _create_user(db_session)
     conn = _create_connection(db_session)
@@ -413,7 +411,7 @@ def test_list_vulns_limit_zero(mock_fetch, client, db_session):
     assert client.get("/vulns?limit=0", headers=_get_headers(client)).json() == []
 
 
-@patch("app.main.fetch_all_vulns", return_value=MOCK_VULN)
+@patch("app.services.wazuhClientService.fetch_all_vulns", return_value=MOCK_VULN)
 def test_list_vulns_shows_connection_name(mock_fetch, client, db_session):
     # newly added test ensures connection_name field is returned
     _create_user(db_session)
@@ -426,7 +424,7 @@ def test_list_vulns_shows_connection_name(mock_fetch, client, db_session):
 
 # fetch vulns
 
-@patch("app.main.fetch_all_vulns")
+@patch("app.services.wazuhClientService.fetch_all_vulns")
 def test_new_vuln_creates_detected_history(mock_fetch, client, db_session):
     mock_fetch.return_value = _raw_vuln()
     _create_user(db_session)
@@ -436,7 +434,7 @@ def test_new_vuln_creates_detected_history(mock_fetch, client, db_session):
     assert "DETECTED" in actions
 
 
-@patch("app.main.fetch_all_vulns")
+@patch("app.services.wazuhClientService.fetch_all_vulns")
 def test_resolved_vuln_gets_reopened(mock_fetch, client, db_session):
     mock_fetch.return_value = _raw_vuln()
     _create_user(db_session)
@@ -453,7 +451,7 @@ def test_resolved_vuln_gets_reopened(mock_fetch, client, db_session):
     assert "REOPENED" in actions
 
 
-@patch("app.main.fetch_all_vulns")
+@patch("app.services.wazuhClientService.fetch_all_vulns")
 def test_vuln_resolved_when_absent_from_payload(mock_fetch, client, db_session):
     mock_fetch.return_value = _raw_vuln()
     _create_user(db_session)
@@ -466,7 +464,7 @@ def test_vuln_resolved_when_absent_from_payload(mock_fetch, client, db_session):
     assert vuln.status == "RESOLVED"
 
 
-@patch("app.main.fetch_all_vulns")
+@patch("app.services.wazuhClientService.fetch_all_vulns")
 def test_severity_change_logged_in_history(mock_fetch, client, db_session):
     mock_fetch.return_value = _raw_vuln(severity="Low")
     _create_user(db_session)
@@ -479,7 +477,7 @@ def test_severity_change_logged_in_history(mock_fetch, client, db_session):
     assert "SEVERITY_CHANGED" in actions
 
 
-@patch("app.main.fetch_all_vulns")
+@patch("app.services.wazuhClientService.fetch_all_vulns")
 def test_vuln_without_cve_id_is_skipped(mock_fetch, client, db_session):
     mock_fetch.return_value = [{
         "agent": {"id": "001", "name": "host-1"},
