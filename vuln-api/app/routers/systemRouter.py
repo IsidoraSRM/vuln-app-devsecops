@@ -1,6 +1,7 @@
 from fastapi import APIRouter
 from fastapi.responses import JSONResponse
 from sqlalchemy.sql import text
+from prometheus_client import REGISTRY
 from ..db import SessionLocal
 
 router = APIRouter(tags=["system"])
@@ -26,3 +27,20 @@ def recent_logs(lines: int = 200):
         return {"lines": get_recent_logs(lines)}
     except Exception as e:
         return JSONResponse(status_code=500, content={"error": "failed_to_read_logs", "details": str(e)})
+
+
+@router.get("/metrics-summary")
+def metrics_summary():
+    """Devuelve las metricas de Prometheus en formato JSON plano para consumo del frontend.
+    Se llama 'metrics-summary' (sin slash) porque app.mount('/metrics') captura cualquier /metrics/*.
+    """
+    result = {}
+    for metric in REGISTRY.collect():
+        for sample in metric.samples:
+            # sample.name incluye sufijos: _total, _created, _bucket, _sum, _count
+            if sample.labels:
+                key = f"{sample.name}{{{','.join(f'{k}={v}' for k, v in sorted(sample.labels.items()))}}}"
+            else:
+                key = sample.name
+            result[key] = sample.value
+    return result
