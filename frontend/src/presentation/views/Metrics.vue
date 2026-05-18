@@ -24,8 +24,9 @@ import { ref, computed, onMounted } from 'vue'
 import apiClient from '../../infrastructure/http/apiClient'
 
 const data = ref({})
-const base = (apiClient.defaults && apiClient.defaults.baseURL) ? apiClient.defaults.baseURL.replace(/\/$/, '') : (import.meta.env.VITE_API_URL || 'http://127.0.0.1:8000')
-const metricsUrl = `${base}/metrics`
+// URL absoluta para que el link "Ver raw /metrics" funcione siempre,
+// sin depender de cómo se resuelve apiClient.baseURL.
+const metricsUrl = '/api/metrics'
 const autoRefresh = ref(false)
 const intervalSec = ref(10)
 let timer = null
@@ -39,7 +40,7 @@ const meanSync = computed(() => {
 
 async function refresh() {
   try {
-    const res = await apiClient.get('/metrics/json')
+    const res = await apiClient.get('/metrics-summary')
     data.value = res.data
   } catch (e) {
     data.value = { error: e.message || String(e) }

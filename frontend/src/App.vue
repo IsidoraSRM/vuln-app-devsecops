@@ -116,9 +116,8 @@ const handleNavClick = (path) => {
     })
   } else {
     if (path === '/metrics') {
-      
-      const metricsUrl = (import.meta.env.VITE_API_URL || 'http://127.0.0.1:8000').replace(/\/$/, '') + '/api/metrics/'
-      window.open(metricsUrl, '_blank')
+      // navegar a la vista interna de Metricas, no abrir el endpoint raw
+      router.push('/metrics')
       return
     }
     router.push(path)
