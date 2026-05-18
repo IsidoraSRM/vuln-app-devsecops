@@ -16,24 +16,52 @@ pipeline {
 
         stage('CI: Backend Tests & Coverage') {
             steps {
-                // Variables que el container necesita para que `from app.main import app` no falle:
-                //  - PYTHONPATH=/app: permite encontrar el paquete `app`.
-                //  - ENCRYPTION_KEY: generada al vuelo con Fernet, solo para que crypto.py se cargue.
-                //  - DATABASE_URL=sqlite: evita que main.py intente conectarse a PostgreSQL en
-                //    el momento del import (Base.metadata.create_all). Los tests usan SQLite
-                //    in-memory configurada en conftest.py de todos modos.
+                // Levantamos un Postgres efimero en una red bridge para que main.py pueda
+                // conectarse al importarse. Los modelos usan composite PK con autoincrement,
+                // que SQLite no soporta, asi que PG es necesario incluso para que se cargue
+                // el modulo. El conftest.py de los tests sigue usando SQLite in-memory.
                 catchError(buildResult: 'SUCCESS', stageResult: 'UNSTABLE') {
                     sh '''
+                        # Red bridge temporal para que el container de tests vea al de Postgres
+                        docker network create ci-pg-net-$BUILD_NUMBER || true
+
+                        # Postgres efimero
+                        docker run -d --rm \
+                            --name pg-test-$BUILD_NUMBER \
+                            --network ci-pg-net-$BUILD_NUMBER \
+                            -e POSTGRES_USER=test \
+                            -e POSTGRES_PASSWORD=test \
+                            -e POSTGRES_DB=test \
+                            postgres:15-alpine
+
+                        # Esperar a que PG este listo
+                        for i in $(seq 1 20); do
+                            if docker exec pg-test-$BUILD_NUMBER pg_isready -U test >/dev/null 2>&1; then
+                                echo "Postgres ready"
+                                break
+                            fi
+                            sleep 1
+                        done
+
+                        # Correr pytest contra el PG efimero
                         docker run --rm \
+                            --network ci-pg-net-$BUILD_NUMBER \
                             -v "$WORKSPACE/vuln-api:/app" \
                             -w /app \
                             -e PYTHONPATH=/app \
-                            -e DATABASE_URL="sqlite:///./test.db" \
+                            -e DATABASE_URL="postgresql://test:test@pg-test-$BUILD_NUMBER:5432/test" \
                             python:3.12-slim bash -c '
                                 pip install --no-cache-dir -q -r requirements.txt &&
                                 export ENCRYPTION_KEY=$(python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())") &&
                                 pytest --cov=app --cov-report=xml:coverage.xml --junitxml=test-results.xml tests/
                             '
+                        TEST_EXIT=$?
+
+                        # Cleanup siempre (aunque los tests fallen)
+                        docker stop pg-test-$BUILD_NUMBER >/dev/null 2>&1 || true
+                        docker network rm ci-pg-net-$BUILD_NUMBER >/dev/null 2>&1 || true
+
+                        exit $TEST_EXIT
                     '''
                 }
             }
