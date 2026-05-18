@@ -16,17 +16,19 @@ pipeline {
 
         stage('CI: Backend Tests & Coverage') {
             steps {
-                // Corre pytest con SQLite in-memory (conftest.py) + coverage XML.
-                // PYTHONPATH=/app permite que `from app.main import app` funcione.
-                // ENCRYPTION_KEY se genera al vuelo dentro del container (Fernet),
-                // solo para que crypto.py se pueda importar. NO es la key de prod.
-                // catchError marca UNSTABLE en lugar de FAILURE si algun test falla.
+                // Variables que el container necesita para que `from app.main import app` no falle:
+                //  - PYTHONPATH=/app: permite encontrar el paquete `app`.
+                //  - ENCRYPTION_KEY: generada al vuelo con Fernet, solo para que crypto.py se cargue.
+                //  - DATABASE_URL=sqlite: evita que main.py intente conectarse a PostgreSQL en
+                //    el momento del import (Base.metadata.create_all). Los tests usan SQLite
+                //    in-memory configurada en conftest.py de todos modos.
                 catchError(buildResult: 'SUCCESS', stageResult: 'UNSTABLE') {
                     sh '''
                         docker run --rm \
                             -v "$WORKSPACE/vuln-api:/app" \
                             -w /app \
                             -e PYTHONPATH=/app \
+                            -e DATABASE_URL="sqlite:///./test.db" \
                             python:3.12-slim bash -c '
                                 pip install --no-cache-dir -q -r requirements.txt &&
                                 export ENCRYPTION_KEY=$(python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())") &&
