@@ -18,6 +18,8 @@ pipeline {
             steps {
                 // Corre pytest con SQLite in-memory (conftest.py) + coverage XML.
                 // PYTHONPATH=/app permite que `from app.main import app` funcione.
+                // ENCRYPTION_KEY se genera al vuelo dentro del container (Fernet),
+                // solo para que crypto.py se pueda importar. NO es la key de prod.
                 // catchError marca UNSTABLE en lugar de FAILURE si algun test falla.
                 catchError(buildResult: 'SUCCESS', stageResult: 'UNSTABLE') {
                     sh '''
@@ -25,10 +27,11 @@ pipeline {
                             -v "$WORKSPACE/vuln-api:/app" \
                             -w /app \
                             -e PYTHONPATH=/app \
-                            python:3.12-slim sh -c "
-                                pip install --no-cache-dir -q -r requirements.txt && \
+                            python:3.12-slim bash -c '
+                                pip install --no-cache-dir -q -r requirements.txt &&
+                                export ENCRYPTION_KEY=$(python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())") &&
                                 pytest --cov=app --cov-report=xml:coverage.xml --junitxml=test-results.xml tests/
-                            "
+                            '
                     '''
                 }
             }
