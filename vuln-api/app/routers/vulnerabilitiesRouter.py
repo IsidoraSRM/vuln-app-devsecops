@@ -9,16 +9,16 @@ from ..services.wazuhService import perform_sync_task
 
 router = APIRouter(prefix="/vulns", tags=["vulnerabilities"])
 
-@router.post("/sync-all")
+@router.post("/sync-all", status_code=202)
 def sync_all_connections(
     background_tasks: BackgroundTasks,
-    db: Session = Depends(get_db), 
+    db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
     conns = db.query(WazuhConnection).filter(WazuhConnection.is_active == True).all()
     for conn in conns:
         background_tasks.add_task(perform_sync_task, conn.id, current_user.username)
-    return {"message": "Sincronización global iniciada en segundo plano."}
+    return {"message": "Sincronización global en segundo plano iniciada."}
 
 @router.get("")
 def list_vulns(

@@ -107,7 +107,7 @@ def test_wazuh_connection_endpoint(
 
     return {"ok": ok, "message": "Conexión exitosa" if ok else "No se pudo conectar"}
 
-@router.post("/{conn_id}/sync")
+@router.post("/{conn_id}/sync", status_code=202)
 def sync_connection(
     conn_id: int,
     background_tasks: BackgroundTasks,
@@ -121,4 +121,4 @@ def sync_connection(
         raise HTTPException(status_code=400, detail="La conexión está inactiva")
 
     background_tasks.add_task(perform_sync_task, conn.id, current_user.username)
-    return {"message": "Sincronización iniciada en segundo plano. Esto puede tomar unos minutos."}
+    return {"message": "Sincronización en segundo plano iniciada. Esto puede tomar unos minutos."}
