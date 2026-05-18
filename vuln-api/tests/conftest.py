@@ -1,3 +1,4 @@
+import os
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
@@ -6,14 +7,19 @@ from sqlalchemy.pool import StaticPool
 from app.main import app
 from app.db import Base, get_db
 
-# Base de datos de prueba en memoria (SQLite)
-SQLALCHEMY_DATABASE_URL = "sqlite:///:memory:"
+# DATABASE_URL del entorno (CI usa Postgres efimero), fallback SQLite local.
+# Los modelos tienen composite PK con autoincrement, que SQLite no soporta,
+# por eso en CI necesitamos un Postgres real.
+SQLALCHEMY_DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///:memory:")
 
-engine = create_engine(
-    SQLALCHEMY_DATABASE_URL,
-    connect_args={"check_same_thread": False},  # Necesario solo para SQLite
-    poolclass=StaticPool, 
-)
+if SQLALCHEMY_DATABASE_URL.startswith("sqlite"):
+    engine = create_engine(
+        SQLALCHEMY_DATABASE_URL,
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+else:
+    engine = create_engine(SQLALCHEMY_DATABASE_URL)
 TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 

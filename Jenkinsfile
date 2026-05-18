@@ -140,6 +140,9 @@ pipeline {
         always {
             // Archivar reports para que sean descargables desde Jenkins UI.
             archiveArtifacts artifacts: 'vuln-api/coverage.xml, vuln-api/test-results.xml, frontend/coverage/**, frontend/test-results.xml, zap-reports/*', allowEmptyArchive: true
+
+            // Dashboard nativo de tests en Jenkins (pasados/fallidos/skip por build).
+            junit allowEmptyResults: true, testResults: '**/test-results.xml'
         }
         success {
             echo 'Pipeline OK — todos los stages pasaron.'
