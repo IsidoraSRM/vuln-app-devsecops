@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends, Query, BackgroundTasks
 from sqlalchemy.orm import Session
-from sqlalchemy.sql import func
+from sqlalchemy.sql import func, text
 from typing import Optional, List
 from ..db import get_db
 from ..models import User, WazuhConnection, WazuhVulnerability
@@ -114,4 +114,42 @@ def list_vulns(
         "page": page,
         "limit": limit if limit is not None else total_count,
         "items": items
+    }
+
+@router.get("/filters")
+def get_unique_filters(connection_id: Optional[int] = None, db: Session = Depends(get_db)):
+    """Obtiene los valores únicos de filtros desde las vistas materializadas precalculadas."""
+    try:
+        if connection_id:
+            agents_res = db.execute(text("SELECT agent_name FROM mv_unique_agents WHERE connection_id = :conn_id"), {"conn_id": connection_id}).fetchall()
+            cves_res = db.execute(text("SELECT cve_id FROM mv_unique_cves WHERE connection_id = :conn_id"), {"conn_id": connection_id}).fetchall()
+            packages_res = db.execute(text("SELECT package_name FROM mv_unique_packages WHERE connection_id = :conn_id"), {"conn_id": connection_id}).fetchall()
+            severities_res = db.execute(text("SELECT severity FROM mv_unique_severities WHERE connection_id = :conn_id"), {"conn_id": connection_id}).fetchall()
+        else:
+            agents_res = db.execute(text("SELECT DISTINCT agent_name FROM mv_unique_agents")).fetchall()
+            cves_res = db.execute(text("SELECT DISTINCT cve_id FROM mv_unique_cves")).fetchall()
+            packages_res = db.execute(text("SELECT DISTINCT package_name FROM mv_unique_packages")).fetchall()
+            severities_res = db.execute(text("SELECT DISTINCT severity FROM mv_unique_severities")).fetchall()
+
+        agents = [r[0] for r in agents_res if r[0]]
+        cves = [r[0] for r in cves_res if r[0]]
+        packages = [r[0] for r in packages_res if r[0]]
+        severities = [r[0] for r in severities_res if r[0]]
+
+    except Exception:
+        # Fallback para desarrollo local con SQLite sin vistas materializadas
+        query = db.query(WazuhVulnerability)
+        if connection_id:
+            query = query.filter(WazuhVulnerability.connection_id == connection_id)
+        
+        agents = [r[0] for r in query.with_entities(WazuhVulnerability.agent_name).distinct().all() if r[0]]
+        cves = [r[0] for r in query.with_entities(WazuhVulnerability.cve_id).distinct().all() if r[0]]
+        packages = [r[0] for r in query.with_entities(WazuhVulnerability.package_name).distinct().all() if r[0]]
+        severities = [r[0] for r in query.with_entities(WazuhVulnerability.severity).distinct().all() if r[0]]
+
+    return {
+        "agents": sorted(agents),
+        "cves": sorted(cves),
+        "packages": sorted(packages),
+        "severities": sorted(severities)
     }

@@ -13,6 +13,7 @@ const paginated = (items, total = null) => ({
 vi.mock('@/application/services/vulnService', () => ({
     default: {
         getVulns: vi.fn(),
+        getUniqueFilters: vi.fn(),
         syncVulns: vi.fn()
     }
 }))
@@ -53,6 +54,14 @@ describe('Dashboard.vue', () => {
         vi.clearAllMocks()
 
         wazuhService.getConnections.mockResolvedValue({ data: [] })
+        vulnService.getUniqueFilters.mockResolvedValue({
+            data: {
+                agents: [],
+                cves: [],
+                packages: [],
+                severities: []
+            }
+        })
     })
 
     it('renders loading state initially and then shows vulns', async () => {
@@ -66,8 +75,9 @@ describe('Dashboard.vue', () => {
         await flushPromises()
 
         expect(wrapper.vm.loading).toBe(false)
-        // onMounted dispara 2 llamadas: fetchVulns + fetchFilterOptionsData (paginacion server-side)
-        expect(vulnService.getVulns).toHaveBeenCalledTimes(2)
+        // onMounted dispara 1 llamada a getVulns y 1 a getUniqueFilters
+        expect(vulnService.getVulns).toHaveBeenCalledTimes(1)
+        expect(vulnService.getUniqueFilters).toHaveBeenCalledTimes(1)
         expect(wrapper.vm.vulns.length).toBe(2)
 
         // Check if table rendered with correct number of rows (excluding header)
@@ -95,16 +105,18 @@ describe('Dashboard.vue', () => {
         const wrapper = mount(Dashboard)
         await flushPromises() // Wait for initial fetch
 
-        // onMounted dispara 2 llamadas iniciales
-        expect(vulnService.getVulns).toHaveBeenCalledTimes(2)
+        // onMounted dispara 1 llamada inicial a getVulns y 1 a getUniqueFilters
+        expect(vulnService.getVulns).toHaveBeenCalledTimes(1)
+        expect(vulnService.getUniqueFilters).toHaveBeenCalledTimes(1)
 
         // Trigger sync
         await wrapper.vm.syncVulns()
 
         expect(wrapper.vm.syncing).toBe(false)
         expect(vulnService.syncVulns).toHaveBeenCalledTimes(1)
-        // sync re-dispara fetchFilterOptionsData + fetchVulns: total = 2 (mount) + 2 (sync) = 4
-        expect(vulnService.getVulns).toHaveBeenCalledTimes(4)
+        // sync re-dispara fetchFilterOptionsData + fetchVulns: total = 2 de cada uno
+        expect(vulnService.getVulns).toHaveBeenCalledTimes(2)
+        expect(vulnService.getUniqueFilters).toHaveBeenCalledTimes(2)
     })
 
     it('shows error when sync fails', async () => {
@@ -506,6 +518,14 @@ describe('Dashboard.vue', () => {
             { agent_name: 'Agent-2', cve_id: 'CVE-2', package_name: 'pkg2', severity: 'low' }
         ]
         vulnService.getVulns.mockResolvedValue(paginated(mockVulns))
+        vulnService.getUniqueFilters.mockResolvedValue({
+            data: {
+                agents: ['Agent-1', 'Agent-2'],
+                cves: ['CVE-1', 'CVE-2'],
+                packages: ['pkg1', 'pkg2'],
+                severities: ['critical', 'low']
+            }
+        })
         const wrapper = mount(Dashboard)
         await flushPromises()
         wrapper.vm.search.agent = 'Agent-1'
@@ -883,38 +903,46 @@ describe('Dashboard.vue', () => {
         })
     })
 
-    describe('updateFilterOptions utility function', () => {
-        it('extracts unique agents from vulnerabilities', async () => {
-            const vulnsWithAgents = [
-                { agent_name: 'Agent-1', cve_id: 'CVE-1', package_name: 'pkg1', severity: 'critical' },
-                { agent_name: 'Agent-2', cve_id: 'CVE-2', package_name: 'pkg2', severity: 'low' },
-                { agent_name: 'Agent-1', cve_id: 'CVE-3', package_name: 'pkg3', severity: 'medium' }
-            ]
-            vulnService.getVulns.mockResolvedValue(paginated(vulnsWithAgents))
+    describe('server-side filters loading', () => {
+        it('populates unique agents from getUniqueFilters response', async () => {
+            vulnService.getUniqueFilters.mockResolvedValue({
+                data: {
+                    agents: ['Agent-1', 'Agent-2'],
+                    cves: [],
+                    packages: [],
+                    severities: []
+                }
+            })
             const wrapper = mount(Dashboard)
             await flushPromises()
 
             expect(wrapper.vm.agentOptions).toEqual(['Agent-1', 'Agent-2'])
         })
 
-        it('extracts unique CVE IDs', async () => {
-            const vulnsWithCVE = [
-                { agent_name: 'A1', cve_id: 'CVE-2023-1234', package_name: 'pkg1', severity: 'critical' },
-                { agent_name: 'A2', cve_id: 'CVE-2022-0001', package_name: 'pkg2', severity: 'low' }
-            ]
-            vulnService.getVulns.mockResolvedValue(paginated(vulnsWithCVE))
+        it('populates unique CVE IDs from getUniqueFilters response', async () => {
+            vulnService.getUniqueFilters.mockResolvedValue({
+                data: {
+                    agents: [],
+                    cves: ['CVE-2022-0001', 'CVE-2023-1234'],
+                    packages: [],
+                    severities: []
+                }
+            })
             const wrapper = mount(Dashboard)
             await flushPromises()
 
             expect(wrapper.vm.vulnOptions).toEqual(['CVE-2022-0001', 'CVE-2023-1234'])
         })
 
-        it('extracts unique package names', async () => {
-            const vulnsWithPackages = [
-                { agent_name: 'A1', cve_id: 'CVE-1', package_name: 'bash', severity: 'critical' },
-                { agent_name: 'A2', cve_id: 'CVE-2', package_name: 'curl', severity: 'low' }
-            ]
-            vulnService.getVulns.mockResolvedValue(paginated(vulnsWithPackages))
+        it('populates unique package names from getUniqueFilters response', async () => {
+            vulnService.getUniqueFilters.mockResolvedValue({
+                data: {
+                    agents: [],
+                    cves: [],
+                    packages: ['bash', 'curl'],
+                    severities: []
+                }
+            })
             const wrapper = mount(Dashboard)
             await flushPromises()
 
@@ -922,47 +950,33 @@ describe('Dashboard.vue', () => {
         })
 
         it('handles missing fields gracefully', async () => {
-            const vulnsWithMissing = [
-                { agent_name: null, cve_id: 'CVE-1', package_name: 'pkg1', severity: 'critical' },
-                { agent_name: 'Agent-2', cve_id: undefined, package_name: 'pkg2', severity: 'low' },
-                { agent_name: 'Agent-3', cve_id: 'CVE-3', package_name: null, severity: 'medium' }
-            ]
-            vulnService.getVulns.mockResolvedValue(paginated(vulnsWithMissing))
+            vulnService.getUniqueFilters.mockResolvedValue({
+                data: null
+            })
             const wrapper = mount(Dashboard)
             await flushPromises()
 
-            expect(wrapper.vm.agentOptions).toEqual(['Agent-2', 'Agent-3'])
-            expect(wrapper.vm.vulnOptions).toEqual(['CVE-1', 'CVE-3'])
-            expect(wrapper.vm.packageOptions).toEqual(['pkg1', 'pkg2'])
+            expect(wrapper.vm.agentOptions).toEqual([])
+            expect(wrapper.vm.vulnOptions).toEqual([])
+            expect(wrapper.vm.packageOptions).toEqual([])
         })
 
-        it('sorts severity options by severity level (descending)', async () => {
-            const vulnsWithSeverity = [
-                { agent_name: 'A1', cve_id: 'CVE-1', package_name: 'pkg1', severity: 'low' },
-                { agent_name: 'A2', cve_id: 'CVE-2', package_name: 'pkg2', severity: 'critical' },
-                { agent_name: 'A3', cve_id: 'CVE-3', package_name: 'pkg3', severity: 'medium' },
-                { agent_name: 'A4', cve_id: 'CVE-4', package_name: 'pkg4', severity: 'high' }
-            ]
-            vulnService.getVulns.mockResolvedValue(paginated(vulnsWithSeverity))
+        it('sorts and uppercases severity options', async () => {
+            vulnService.getUniqueFilters.mockResolvedValue({
+                data: {
+                    agents: [],
+                    cves: [],
+                    packages: [],
+                    severities: ['low', 'critical', 'medium', 'high']
+                }
+            })
             const wrapper = mount(Dashboard)
             await flushPromises()
 
-            // Should be sorted: CRITICAL, HIGH, MEDIUM, LOW
             expect(wrapper.vm.severityOptions[0]).toBe('CRITICAL')
             expect(wrapper.vm.severityOptions[1]).toBe('HIGH')
             expect(wrapper.vm.severityOptions[2]).toBe('MEDIUM')
             expect(wrapper.vm.severityOptions[3]).toBe('LOW')
-        })
-
-        it('uppercases severity values', async () => {
-            const vulnsWithLowerSeverity = [
-                { agent_name: 'A1', cve_id: 'CVE-1', package_name: 'pkg1', severity: 'critical' }
-            ]
-            vulnService.getVulns.mockResolvedValue(paginated(vulnsWithLowerSeverity))
-            const wrapper = mount(Dashboard)
-            await flushPromises()
-
-            expect(wrapper.vm.severityOptions).toContain('CRITICAL')
         })
     })
 

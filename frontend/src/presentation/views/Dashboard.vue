@@ -398,27 +398,6 @@ const getSeverityLevel = (s) => {
 }
 
 // Extrae los catálogos únicos a partir de un snapshot de rango amplio
-const updateFilterOptions = (allData) => {
-  const agents = new Set()
-  const vulnIds = new Set()
-  const packages = new Set()
-  const severities = new Set()
-
-  allData.forEach(vuln => {
-    if (vuln.agent_name) agents.add(vuln.agent_name)
-    if (vuln.cve_id) vulnIds.add(vuln.cve_id)
-    if (vuln.package_name) packages.add(vuln.package_name)
-    if (vuln.severity) severities.add(vuln.severity.toUpperCase())
-  })
-
-  agentOptions.value = Array.from(agents).sort()
-  vulnOptions.value = Array.from(vulnIds).sort()
-  packageOptions.value = Array.from(packages).sort()
-  severityOptions.value = Array.from(severities).sort((a, b) => {
-    return getSeverityLevel(b.toLowerCase()) - getSeverityLevel(a.toLowerCase())
-  })
-}
-
 // LLAMADA AL BACKEND CON PARÁMETROS REALES DE BD (PAGINACIÓN SERVER-SIDE)
 const fetchVulns = async () => {
   loading.value = true
@@ -453,15 +432,21 @@ const fetchVulns = async () => {
   }
 }
 
-// Carga las opciones únicas del panel consultando un set amplio de datos iniciales
+// Carga las opciones únicas del panel consultando el endpoint de filtros precalculados
 const fetchFilterOptionsData = async () => {
   try {
-    const res = await vulnService.getVulns({ 
-      limit: 5000, 
-      connectionId: selectedConnection.value || null 
-    })
-    const items = res.data?.items || []
-    updateFilterOptions(items)
+    const res = await vulnService.getUniqueFilters(selectedConnection.value || null)
+    const { agents, cves, packages, severities } = res.data || {}
+    
+    agentOptions.value = (agents || []).sort()
+    vulnOptions.value = (cves || []).sort()
+    packageOptions.value = (packages || []).sort()
+    
+    severityOptions.value = (severities || [])
+      .map(s => s.toUpperCase())
+      .sort((a, b) => {
+        return getSeverityLevel(b.toLowerCase()) - getSeverityLevel(a.toLowerCase())
+      })
   } catch (err) {
     console.error('Error fetching options layout:', err)
   }

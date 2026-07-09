@@ -53,6 +53,14 @@ export default {
         })
     },
 
+    getUniqueFilters: async (connectionId = null) => {
+        const params = {}
+        if (connectionId !== null && connectionId !== undefined && connectionId !== '') {
+            params.connection_id = connectionId
+        }
+        return apiClient.get('/vulns/filters', { params })
+    },
+
     syncVulns: async () => {
         return apiClient.post('/vulns/sync-all')
     },

@@ -1,10 +1,10 @@
 import logging
 import time
 from sqlalchemy.orm import Session
-from sqlalchemy.sql import func
+from sqlalchemy.sql import func, text
 from ..models import WazuhConnection, WazuhVulnerability, VulnerabilityHistory
 from ..metrics import SYNC_DURATION_MS, VULN_DETECTED
-from ..services.wazuhClientService import fetch_all_vulns
+from ..services.providerFactory import VulnerabilityProviderFactory
 from ..crypto import decrypt
 from ..db import SessionLocal
 
@@ -20,12 +20,21 @@ def perform_sync_task(conn_id: int, username: str):
         log.info("sync_started", extra={"connection_id": conn.id, "connection_name": conn.name, "user": username})
         start = time.monotonic()
 
-        raw_vulns = fetch_all_vulns(
+        provider = VulnerabilityProviderFactory.get_provider(conn.provider_type)
+        raw_vulns = provider.fetch_vulnerabilities(
             conn.indexer_url, conn.wazuh_user, decrypt(conn.wazuh_password)
         )
         
         count = process_wazuh_vulnerabilities(db, conn.id, raw_vulns)
         db.commit()
+
+        try:
+            db.execute(text("SELECT refresh_vulnerability_filters();"))
+            db.commit()
+            log.info("filters_materialized_views_refreshed", extra={"connection_id": conn.id})
+        except Exception as ref_err:
+            log.warning("failed_to_refresh_filters_materialized_views", extra={"connection_id": conn.id, "error": str(ref_err)})
+            db.rollback()
 
         elapsed_ms = int((time.monotonic() - start) * 1000)
         SYNC_DURATION_MS.observe(elapsed_ms)

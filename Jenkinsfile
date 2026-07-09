@@ -112,6 +112,22 @@ pipeline {
             }
         }
 
+        stage('SCA: Trivy Dependency Scan') {
+            steps {
+                catchError(buildResult: 'SUCCESS', stageResult: 'UNSTABLE') {
+                    sh '''
+                        docker run --rm \
+                            -v "$WORKSPACE:/apps" \
+                            aquasec/trivy:latest fs \
+                            --scanners vuln \
+                            --severity HIGH,CRITICAL \
+                            --exit-code 0 \
+                            /apps
+                    '''
+                }
+            }
+        }
+
         stage('DAST: OWASP ZAP Dynamic Scan') {
             steps {
                 // Baseline scan = pasivo, no ataca activamente. Rapido (~2-5 min).

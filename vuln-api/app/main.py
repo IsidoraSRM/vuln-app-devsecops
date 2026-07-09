@@ -58,6 +58,59 @@ def setup_timescaledb():
 
 setup_timescaledb()
 
+def setup_db_optimizations():
+    db = SessionLocal()
+    try:
+        log.info("creating_database_indexes")
+        db.execute(text("CREATE INDEX IF NOT EXISTS idx_vuln_severity ON wazuh_vulnerabilities (severity);"))
+        db.execute(text("CREATE INDEX IF NOT EXISTS idx_vuln_agent_name ON wazuh_vulnerabilities (agent_name);"))
+        db.execute(text("CREATE INDEX IF NOT EXISTS idx_vuln_cve_id ON wazuh_vulnerabilities (cve_id);"))
+        db.execute(text("CREATE INDEX IF NOT EXISTS idx_vuln_package_name ON wazuh_vulnerabilities (package_name);"))
+        db.execute(text("CREATE INDEX IF NOT EXISTS idx_vuln_score_base ON wazuh_vulnerabilities (score_base);"))
+        db.execute(text("CREATE INDEX IF NOT EXISTS idx_vuln_last_seen ON wazuh_vulnerabilities (last_seen);"))
+        db.commit()
+    except Exception as e:
+        log.warning(f"No se pudieron crear los índices estándar (puede ser SQLite): {e}")
+        db.rollback()
+
+    try:
+        log.info("creating_materialized_views_and_procedures")
+        db.execute(text("""
+            CREATE MATERIALIZED VIEW IF NOT EXISTS mv_unique_agents AS 
+            SELECT DISTINCT connection_id, agent_name FROM wazuh_vulnerabilities;
+        """))
+        db.execute(text("""
+            CREATE MATERIALIZED VIEW IF NOT EXISTS mv_unique_cves AS 
+            SELECT DISTINCT connection_id, cve_id FROM wazuh_vulnerabilities;
+        """))
+        db.execute(text("""
+            CREATE MATERIALIZED VIEW IF NOT EXISTS mv_unique_packages AS 
+            SELECT DISTINCT connection_id, package_name FROM wazuh_vulnerabilities;
+        """))
+        db.execute(text("""
+            CREATE MATERIALIZED VIEW IF NOT EXISTS mv_unique_severities AS 
+            SELECT DISTINCT connection_id, severity FROM wazuh_vulnerabilities;
+        """))
+        db.execute(text("""
+            CREATE OR REPLACE FUNCTION refresh_vulnerability_filters() RETURNS void AS $$
+            BEGIN
+                REFRESH MATERIALIZED VIEW mv_unique_agents;
+                REFRESH MATERIALIZED VIEW mv_unique_cves;
+                REFRESH MATERIALIZED VIEW mv_unique_packages;
+                REFRESH MATERIALIZED VIEW mv_unique_severities;
+            END;
+            $$ LANGUAGE plpgsql;
+        """))
+        db.commit()
+        log.info("materialized_views_setup_complete")
+    except Exception as e:
+        log.warning(f"No se pudieron crear las vistas materializadas o la función de refresco: {e}")
+        db.rollback()
+    finally:
+        db.close()
+
+setup_db_optimizations()
+
 def create_default_admin():
     db = SessionLocal()
     try:

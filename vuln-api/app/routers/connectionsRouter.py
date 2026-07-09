@@ -5,7 +5,7 @@ from ..db import get_db
 from ..models import User, WazuhConnection
 from ..services.authService import get_current_user
 from ..schemas.wazuhSchema import WazuhConnectionRequest, WazuhConnectionResponse
-from ..services.wazuhClientService import test_connection
+from ..services.providerFactory import VulnerabilityProviderFactory
 from ..crypto import encrypt, decrypt
 from ..services.wazuhService import perform_sync_task
 
@@ -21,6 +21,7 @@ def list_connections(current_user: User = Depends(get_current_user), db: Session
             "name": c.name,
             "indexer_url": c.indexer_url,
             "wazuh_user": c.wazuh_user,
+            "provider_type": c.provider_type,
             "is_active": c.is_active,
             "tested": c.tested,
             "last_tested_at": c.last_tested_at,
@@ -38,15 +39,22 @@ def create_connection(
     if db.query(WazuhConnection).filter(WazuhConnection.name == request.name).first():
         raise HTTPException(status_code=400, detail="Ya existe una conexión con ese nombre")
 
-    ok = test_connection(request.indexer_url, request.wazuh_user, request.wazuh_password)
+    provider_type = request.provider_type or "wazuh"
+    try:
+        provider = VulnerabilityProviderFactory.get_provider(provider_type)
+        ok = provider.test_connection(request.indexer_url, request.wazuh_user, request.wazuh_password)
+    except ValueError as val_err:
+        raise HTTPException(status_code=400, detail=str(val_err))
+
     if not ok:
-        raise HTTPException(status_code=400, detail="No se pudo establecer conexión con el indexador Wazuh")
+        raise HTTPException(status_code=400, detail=f"No se pudo establecer conexión con el indexador ({provider_type})")
 
     conn = WazuhConnection(
         name=request.name,
         indexer_url=request.indexer_url,
         wazuh_user=request.wazuh_user,
         wazuh_password=encrypt(request.wazuh_password),
+        provider_type=provider_type,
         tested=True,
         last_tested_at=func.now(),
         last_test_ok=True,
@@ -70,6 +78,7 @@ def update_connection(
     conn.name = request.name
     conn.indexer_url = request.indexer_url
     conn.wazuh_user = request.wazuh_user
+    conn.provider_type = request.provider_type or "wazuh"
     if request.wazuh_password:
         conn.wazuh_password = encrypt(request.wazuh_password)
     db.commit()
@@ -98,7 +107,8 @@ def test_wazuh_connection_endpoint(
     if not conn:
         raise HTTPException(status_code=404, detail=CONNECTION_NOT_FOUND)
 
-    ok = test_connection(conn.indexer_url, conn.wazuh_user, decrypt(conn.wazuh_password))
+    provider = VulnerabilityProviderFactory.get_provider(conn.provider_type)
+    ok = provider.test_connection(conn.indexer_url, conn.wazuh_user, decrypt(conn.wazuh_password))
 
     conn.tested = True
     conn.last_tested_at = func.now()
