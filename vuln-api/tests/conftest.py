@@ -43,7 +43,28 @@ def db_session():
     finally:
         db.close()
         # Limpiar todas las tablas después de cada test
-        Base.metadata.drop_all(bind=engine)
+        if SQLALCHEMY_DATABASE_URL.startswith("sqlite"):
+            Base.metadata.drop_all(bind=engine)
+        else:
+            from sqlalchemy import text
+            db_cleanup = TestingSessionLocal()
+            try:
+                db_cleanup.execute(text("""
+                    TRUNCATE TABLE 
+                        user_interactions, 
+                        vulnerability_history, 
+                        wazuh_vulnerabilities, 
+                        wazuh_connections, 
+                        users 
+                    RESTART IDENTITY CASCADE;
+                """))
+                db_cleanup.execute(text("SELECT refresh_vulnerability_filters();"))
+                db_cleanup.commit()
+            except Exception:
+                db_cleanup.rollback()
+                Base.metadata.drop_all(bind=engine)
+            finally:
+                db_cleanup.close()
 
 
 @pytest.fixture(scope="function")
