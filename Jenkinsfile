@@ -169,7 +169,7 @@ pipeline {
             echo 'Pipeline UNSTABLE — algunas stages tuvieron warnings (tests, ZAP).'
         }
         failure {
-            echo 'Pipeline FAILED — revisa SonarQube en http://18.116.72.101:9000/dashboard?id=vuln-app'
+            echo 'Pipeline FAILED — revisa SonarQube en http://18.218.47.7:9000/dashboard?id=vuln-app'
         }
     }
 }
