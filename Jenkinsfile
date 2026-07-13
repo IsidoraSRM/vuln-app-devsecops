@@ -9,7 +9,7 @@ pipeline {
 
     environment {
         // Target URL del DAST (Wazuh dashboard publico). Cambiar si conviene.
-        ZAP_TARGET = 'https://18.191.172.171'
+        ZAP_TARGET = 'http://18.218.47.7'
     }
 
     stages {
