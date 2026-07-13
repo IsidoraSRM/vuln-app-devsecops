@@ -32,7 +32,7 @@ pipeline {
                             -e POSTGRES_USER=test \
                             -e POSTGRES_PASSWORD=test \
                             -e POSTGRES_DB=test \
-                            postgres:15-alpine
+                            timescale/timescaledb:latest-pg15
 
                         # Esperar a que PG este listo
                         for i in $(seq 1 20); do

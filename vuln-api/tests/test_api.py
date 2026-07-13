@@ -262,7 +262,7 @@ def test_list_connections_empty(client, db_session):
     assert res.json() == []
 
 
-@patch("app.routers.connectionsRouter.test_connection", return_value=True)
+@patch("app.services.wazuhProvider.WazuhVulnerabilityProvider.test_connection", return_value=True)
 def test_create_connection(mock_test, client, db_session):
     # the endpoint should automatically verify the Wazuh connection
     _create_user(db_session)
@@ -279,7 +279,7 @@ def test_create_connection_duplicate_name(client, db_session):
     client.post("/wazuh-connections", json=payload, headers=headers)
     assert client.post("/wazuh-connections", json=payload, headers=headers).status_code == 400
 
-@patch("app.routers.connectionsRouter.test_connection", return_value=False)
+@patch("app.services.wazuhProvider.WazuhVulnerabilityProvider.test_connection", return_value=False)
 def test_create_connection_fails_when_unreachable(mock_test, client, db_session):
     _create_user(db_session)
     payload = {"name": "bad", "indexer_url": "https://bad", "wazuh_user": "u", "wazuh_password": "p"}
@@ -318,7 +318,7 @@ def test_delete_nonexistent_connection(client, db_session):
     assert client.delete("/wazuh-connections/9999", headers=_get_headers(client)).status_code == 404
 
 
-@patch("app.routers.connectionsRouter.test_connection", return_value=True)
+@patch("app.services.wazuhProvider.WazuhVulnerabilityProvider.test_connection", return_value=True)
 def test_test_connection_ok(mock_test, client, db_session):
     _create_user(db_session)
     conn = _create_connection(db_session)
@@ -326,7 +326,7 @@ def test_test_connection_ok(mock_test, client, db_session):
     assert res.json()["ok"] is True
 
 
-@patch("app.routers.connectionsRouter.test_connection", return_value=False)
+@patch("app.services.wazuhProvider.WazuhVulnerabilityProvider.test_connection", return_value=False)
 def test_test_connection_fail(mock_test, client, db_session):
     _create_user(db_session)
     conn = _create_connection(db_session)

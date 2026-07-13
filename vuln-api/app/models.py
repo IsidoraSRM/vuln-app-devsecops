@@ -12,7 +12,11 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
-from .db import Base
+from .db import Base, DATABASE_URL
+
+# SQLite does not support autoincrement for composite primary keys.
+# We disable composite PKs on SQLite (e.g. for local testing).
+IS_SQLITE = DATABASE_URL.startswith("sqlite") if DATABASE_URL else False
 
 
 class User(Base):
@@ -49,7 +53,7 @@ class UserInteraction(Base):
     endpoint = Column(String, index=True)
     method = Column(String)
     details = Column(Text, nullable=True)
-    timestamp = Column(DateTime(timezone=True), primary_key=True, server_default=func.now())
+    timestamp = Column(DateTime(timezone=True), primary_key=not IS_SQLITE, server_default=func.now())
     user = relationship("User", back_populates="interactions")
 
 
@@ -110,5 +114,5 @@ class VulnerabilityHistory(Base):
     )
     action = Column(String, nullable=False)
     details = Column(Text, nullable=True)
-    timestamp = Column(DateTime(timezone=True), primary_key=True, server_default=func.now())
+    timestamp = Column(DateTime(timezone=True), primary_key=not IS_SQLITE, server_default=func.now())
     vulnerability = relationship("WazuhVulnerability", back_populates="history")
