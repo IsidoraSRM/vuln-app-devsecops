@@ -27,7 +27,10 @@ describe('apiClient.js', () => {
         const apiClient = (await import('@/infrastructure/http/apiClient')).default
 
         expect(axios.create).toHaveBeenCalledWith({
-            baseURL: 'http://api-test:8000/api'
+            baseURL: 'http://api-test:8000/api',
+            paramsSerializer: {
+                indexes: null
+            }
         })
 
         // Validar que se ha importado como default
