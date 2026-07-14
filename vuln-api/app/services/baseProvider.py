@@ -11,3 +11,8 @@ class VulnerabilityProvider(ABC):
     def fetch_vulnerabilities(self, indexer_url: str, user: str, password_decrypted: str) -> List[Dict[str, Any]]:
         """Fetch raw vulnerabilities from the provider's data source."""
         pass
+
+    @abstractmethod
+    def fetch_vulnerabilities_batches(self, indexer_url: str, user: str, password_decrypted: str):
+        """Fetch raw vulnerabilities from the provider's data source in batches."""
+        pass

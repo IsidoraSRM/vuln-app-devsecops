@@ -19,7 +19,7 @@ log = logging.getLogger(__name__)
 
 VULN_INDEX = "wazuh-states-vulnerabilities-*"
 SCROLL_TTL = "2m"
-BATCH_SIZE = 1000
+BATCH_SIZE = 10000
 REQUEST_TIMEOUT = 60
 
 # Errores que justifican reintento: red caida, timeout, server 5xx.
