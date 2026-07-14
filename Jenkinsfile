@@ -142,25 +142,49 @@ pipeline {
                             cp .env.example .env
                         fi
                         
-                        # 2. Levantar la base de datos y la API de manera efímera para el test
-                        echo "Levantando servicios efímeros para el escaneo DAST..."
-                        docker compose -p vuln-app-dast up -d db-api api
+                        # 2. Modificar el archivo docker-compose dinámicamente usando Python
+                        # Esto elimina 'container_name' y 'ports' para evitar conflictos de nombres y puertos con los contenedores permanentes del host.
+                        python3 -c '
+with open("docker-compose.yml") as f:
+    lines = f.readlines()
+out = []
+skip_ports = False
+for line in lines:
+    if "container_name:" in line:
+        continue
+    if line.strip().startswith("ports:"):
+        skip_ports = True
+        continue
+    if skip_ports:
+        if line.strip().startswith("-"):
+            continue
+        else:
+            skip_ports = False
+    out.append(line)
+with open("docker-compose.dast.yml", "w") as f:
+    f.writelines(out)
+'
                         
-                        # 3. Esperar a que la API esté lista y respondiendo (máximo 40 segundos)
-                        echo "Esperando a que la API responda en http://localhost:8000/docs..."
+                        # 3. Levantar la base de datos y la API de manera efímera para el test
+                        echo "Levantando servicios efímeros (sin conflictos) para el escaneo DAST..."
+                        docker compose -f docker-compose.dast.yml -p vuln-app-dast up -d db-api api
+                        
+                        # 4. Esperar a que la API esté lista y saludable usando inspección de Docker (máximo 40 segundos)
+                        echo "Esperando a que la API esté lista..."
                         for i in $(seq 1 40); do
-                            if curl -s -o /dev/null -w "%{http_code}" http://localhost:8000/docs | grep -q "200"; then
-                                echo "API lista y saludable."
+                            STATUS=$(docker inspect -f "{{.State.Health.Status}}" vuln-app-dast-api-1 2>/dev/null || docker inspect -f "{{.State.Health.Status}}" vuln-app-dast_api_1 2>/dev/null)
+                            if [ "$STATUS" = "healthy" ]; then
+                                echo "API lista y saludable en la red Docker."
                                 break
                             fi
                             sleep 1
                         done
                         
-                        # 4. Crear carpeta de reportes y dar permisos
+                        # 5. Crear carpeta de reportes y dar permisos
                         mkdir -p zap-reports
                         chmod 777 zap-reports
                         
-                        # 5. Ejecutar OWASP ZAP conectado a la misma red interna
+                        # 6. Ejecutar OWASP ZAP conectado a la misma red interna
                         echo "Iniciando escaneo dinámico DAST en red interna..."
                         docker run --rm \
                             --network vuln-app-dast_app-network \
@@ -174,9 +198,9 @@ pipeline {
                         
                         ZAP_EXIT=$?
                         
-                        # 6. Apagar y limpiar el entorno de pruebas
+                        # 7. Apagar y limpiar el entorno de pruebas
                         echo "Limpiando contenedores DAST..."
-                        docker compose -p vuln-app-dast down -v
+                        docker compose -f docker-compose.dast.yml -p vuln-app-dast down -v
                         
                         exit $ZAP_EXIT
                     '''
