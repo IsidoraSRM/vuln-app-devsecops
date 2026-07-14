@@ -137,27 +137,48 @@ pipeline {
                 // $ZAP_TARGET viene del bloque environment {}, lo expande Bash en la sh.
                 catchError(buildResult: 'SUCCESS', stageResult: 'UNSTABLE') {
                     sh '''
+                        # 1. Asegurar que existe el archivo .env para docker compose
+                        if [ ! -f .env ]; then
+                            cp .env.example .env
+                        fi
+                        
+                        # 2. Levantar la base de datos y la API de manera efímera para el test
+                        echo "Levantando servicios efímeros para el escaneo DAST..."
+                        docker compose -p vuln-app-dast up -d db-api api
+                        
+                        # 3. Esperar a que la API esté lista y respondiendo (máximo 40 segundos)
+                        echo "Esperando a que la API responda en http://localhost:8000/docs..."
+                        for i in $(seq 1 40); do
+                            if curl -s -o /dev/null -w "%{http_code}" http://localhost:8000/docs | grep -q "200"; then
+                                echo "API lista y saludable."
+                                break
+                            fi
+                            sleep 1
+                        done
+                        
+                        # 4. Crear carpeta de reportes y dar permisos
                         mkdir -p zap-reports
                         chmod 777 zap-reports
                         
-                        # Comprobar si el objetivo está activo antes de lanzar el escáner
-                        if curl -s -I --connect-timeout 5 "$ZAP_TARGET" > /dev/null; then
-                            echo "Objetivo activo. Iniciando OWASP ZAP..."
-                            docker run --rm \
-                                -v "$WORKSPACE/zap-reports:/zap/wrk:rw" \
-                                -e ZAP_TARGET="$ZAP_TARGET" \
-                                ghcr.io/zaproxy/zaproxy:stable \
-                                zap-baseline.py \
-                                    -t "$ZAP_TARGET" \
-                                    -r zap-report.html \
-                                    -J zap-report.json \
-                                    -I
-                        else
-                            echo "⚠️ El objetivo $ZAP_TARGET no responde (Connection Refused/Timeout). Omitiendo escaneo DAST para mantener el pipeline en verde."
-                            # Generamos reportes ficticios para que no falle la etapa de archivado de Jenkins
-                            echo "<html><body>El servidor de pruebas no estaba activo durante la ejecucion. DAST omitido con exito.</body></html>" > zap-reports/zap-report.html
-                            echo '{"status": "skipped", "reason": "Target offline"}' > zap-reports/zap-report.json
-                        fi
+                        # 5. Ejecutar OWASP ZAP conectado a la misma red interna
+                        echo "Iniciando escaneo dinámico DAST en red interna..."
+                        docker run --rm \
+                            --network vuln-app-dast_app-network \
+                            -v "$WORKSPACE/zap-reports:/zap/wrk:rw" \
+                            ghcr.io/zaproxy/zaproxy:stable \
+                            zap-baseline.py \
+                                -t "http://api:8000/docs" \
+                                -r zap-report.html \
+                                -J zap-report.json \
+                                -I
+                        
+                        ZAP_EXIT=$?
+                        
+                        # 6. Apagar y limpiar el entorno de pruebas
+                        echo "Limpiando contenedores DAST..."
+                        docker compose -p vuln-app-dast down -v
+                        
+                        exit $ZAP_EXIT
                     '''
                 }
             }
