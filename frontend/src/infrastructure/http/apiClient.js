@@ -8,6 +8,9 @@ const baseURL = resolved.endsWith('/api') ? resolved : resolved.replace(/\/$/, '
 
 const apiClient = axios.create({
     baseURL,
+    paramsSerializer: {
+        indexes: null
+    }
 });
 
 

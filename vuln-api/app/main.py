@@ -92,12 +92,17 @@ def setup_db_optimizations():
             SELECT DISTINCT connection_id, severity FROM wazuh_vulnerabilities;
         """))
         db.execute(text("""
+            CREATE MATERIALIZED VIEW IF NOT EXISTS mv_unique_os AS 
+            SELECT DISTINCT connection_id, os_platform, os_version FROM wazuh_vulnerabilities;
+        """))
+        db.execute(text("""
             CREATE OR REPLACE FUNCTION refresh_vulnerability_filters() RETURNS void AS $$
             BEGIN
                 REFRESH MATERIALIZED VIEW mv_unique_agents;
                 REFRESH MATERIALIZED VIEW mv_unique_cves;
                 REFRESH MATERIALIZED VIEW mv_unique_packages;
                 REFRESH MATERIALIZED VIEW mv_unique_severities;
+                REFRESH MATERIALIZED VIEW mv_unique_os;
             END;
             $$ LANGUAGE plpgsql;
         """))

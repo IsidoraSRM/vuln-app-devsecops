@@ -125,16 +125,19 @@ def get_unique_filters(connection_id: Optional[int] = None, db: Session = Depend
             cves_res = db.execute(text("SELECT cve_id FROM mv_unique_cves WHERE connection_id = :conn_id"), {"conn_id": connection_id}).fetchall()
             packages_res = db.execute(text("SELECT package_name FROM mv_unique_packages WHERE connection_id = :conn_id"), {"conn_id": connection_id}).fetchall()
             severities_res = db.execute(text("SELECT severity FROM mv_unique_severities WHERE connection_id = :conn_id"), {"conn_id": connection_id}).fetchall()
+            os_res = db.execute(text("SELECT os_platform, os_version FROM mv_unique_os WHERE connection_id = :conn_id"), {"conn_id": connection_id}).fetchall()
         else:
             agents_res = db.execute(text("SELECT DISTINCT agent_name FROM mv_unique_agents")).fetchall()
             cves_res = db.execute(text("SELECT DISTINCT cve_id FROM mv_unique_cves")).fetchall()
             packages_res = db.execute(text("SELECT DISTINCT package_name FROM mv_unique_packages")).fetchall()
             severities_res = db.execute(text("SELECT DISTINCT severity FROM mv_unique_severities")).fetchall()
+            os_res = db.execute(text("SELECT DISTINCT os_platform, os_version FROM mv_unique_os")).fetchall()
 
         agents = [r[0] for r in agents_res if r[0]]
         cves = [r[0] for r in cves_res if r[0]]
         packages = [r[0] for r in packages_res if r[0]]
         severities = [r[0] for r in severities_res if r[0]]
+        os_list = [{"platform": r[0], "version": r[1]} for r in os_res if r[0]]
 
     except Exception:
         # Fallback para desarrollo local con SQLite sin vistas materializadas
@@ -146,10 +149,23 @@ def get_unique_filters(connection_id: Optional[int] = None, db: Session = Depend
         cves = [r[0] for r in query.with_entities(WazuhVulnerability.cve_id).distinct().all() if r[0]]
         packages = [r[0] for r in query.with_entities(WazuhVulnerability.package_name).distinct().all() if r[0]]
         severities = [r[0] for r in query.with_entities(WazuhVulnerability.severity).distinct().all() if r[0]]
+        os_query_res = query.with_entities(WazuhVulnerability.os_platform, WazuhVulnerability.os_version).distinct().all()
+        os_list = [{"platform": r[0], "version": r[1]} for r in os_query_res if r[0]]
+
+    # Deduplicar os_list (por si acaso hay nulos iterados)
+    unique_os = []
+    seen = set()
+    for os_item in os_list:
+        key = (os_item["platform"], os_item["version"])
+        if key not in seen:
+            seen.add(key)
+            unique_os.append(os_item)
 
     return {
         "agents": sorted(agents),
         "cves": sorted(cves),
         "packages": sorted(packages),
-        "severities": sorted(severities)
+        "severities": sorted(severities),
+        "os": unique_os
     }
+
