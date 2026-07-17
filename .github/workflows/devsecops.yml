@@ -146,7 +146,7 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Run Trivy SCA Scan
-        uses: aquasecurity/trivy-action@v0.29.0
+        uses: aquasecurity/trivy-action@v0.36.0
         with:
           scan-type: 'fs'
           scan-ref: '.'
@@ -179,16 +179,13 @@ jobs:
           export SECRET_KEY="supersecret"
           sed -i "s|^ENCRYPTION_KEY=.*|ENCRYPTION_KEY=$ENCRYPTION_KEY|g" .env
           
-          # Remove container_name and inject variables explicitly into environment block
+          # Remove container_name to avoid potential naming conflicts in docker compose
           python -c "
           with open('docker-compose.yml') as f:
-              content = f.read()
-          content = content.replace('DATABASE_URL: postgresql://\${POSTGRES_USER}:\${POSTGRES_PASSWORD}@db-api:5432/\${POSTGRES_DB}', 
-                                    'DATABASE_URL: postgresql://\${POSTGRES_USER}:\${POSTGRES_PASSWORD}@db-api:5432/\${POSTGRES_DB}\n      ENCRYPTION_KEY: \${ENCRYPTION_KEY}\n      SECRET_KEY: \${SECRET_KEY}')
-          lines = content.splitlines()
+              lines = f.readlines()
           out = [line for line in lines if 'container_name:' not in line]
           with open('docker-compose.yml', 'w') as f:
-              f.write('\n'.join(out) + '\n')
+              f.write(''.join(out))
           "
           docker compose up -d db-api api
 
