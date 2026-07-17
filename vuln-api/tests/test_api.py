@@ -103,9 +103,11 @@ def test_sync_vulnerabilities_unauthorized(client, db_session):
     assert response.status_code == 401
 
 
-@pytest.mark.skip(reason="Pendiente reescribir tras refactor sync->async - deuda tecnica documentada")
-@patch("app.services.wazuhClientService.fetch_all_vulns")
-def test_sync_vulnerabilities_success(mock_fetch, client, db_session):
+@patch("app.services.wazuhService.SessionLocal")
+@patch("app.services.wazuhProvider.WazuhVulnerabilityProvider.fetch_vulnerabilities_batches")
+def test_sync_vulnerabilities_success(mock_fetch, mock_session_local, client, db_session):
+    db_session.close = lambda: None
+    mock_session_local.return_value = db_session
     from app.services.authService import pwd_context
     test_user = User(username="admin", password_hash=pwd_context.hash("admin"), is_active=True)
     db_session.add(test_user)
@@ -119,7 +121,7 @@ def test_sync_vulnerabilities_success(mock_fetch, client, db_session):
     login_res = client.post("/auth/login", data={"username": "admin", "password": "admin"})
     headers = {"Authorization": f"Bearer {login_res.json()['access_token']}"}
 
-    mock_fetch.return_value = [{
+    mock_fetch.return_value = [[{
         "agent": {"id": "001", "name": "test-agent"},
         "host": {"os": {"full": "Ubuntu 22.04", "platform": "ubuntu", "version": "22.04"}},
         "package": {"name": "openssl", "version": "1.1.1", "type": "deb", "architecture": "amd64"},
@@ -130,15 +132,16 @@ def test_sync_vulnerabilities_success(mock_fetch, client, db_session):
             "description": "Test", "reference": "https://nvd.nist.gov",
             "scanner": {"vendor": "wazuh"},
         },
-    }]
+    }]]
 
     sync_res = client.post(f"/wazuh-connections/{conn.id}/sync", headers=headers)
     assert sync_res.status_code == 202
     assert "Sincronización en segundo plano" in sync_res.json()["message"]
 
     get_res = client.get("/vulns", headers=headers)
-    assert len(get_res.json()) == 1
-    vuln_item = get_res.json()[0]
+    items = get_res.json()["items"]
+    assert len(items) == 1
+    vuln_item = items[0]
     assert vuln_item["cve_id"] == "CVE-2023-1234"
     # new requirement: response should include origin connection name
     assert vuln_item.get("connection_name") == "test"
@@ -341,9 +344,11 @@ def test_test_nonexistent_connection(client, db_session):
 
 # sync per conn
 
-@pytest.mark.skip(reason="Pendiente reescribir tras refactor sync->async - deuda tecnica documentada")
-@patch("app.services.wazuhClientService.fetch_all_vulns", return_value=MOCK_VULN)
-def test_sync_connection_success(mock_fetch, client, db_session):
+@patch("app.services.wazuhService.SessionLocal")
+@patch("app.services.wazuhProvider.WazuhVulnerabilityProvider.fetch_vulnerabilities_batches", return_value=[MOCK_VULN])
+def test_sync_connection_success(mock_fetch, mock_session_local, client, db_session):
+    db_session.close = lambda: None
+    mock_session_local.return_value = db_session
     _create_user(db_session)
     conn = _create_connection(db_session)
     res = client.post(f"/wazuh-connections/{conn.id}/sync", headers=_get_headers(client))
@@ -366,9 +371,11 @@ def test_sync_nonexistent_connection(client, db_session):
 
 # sync all
 
-@pytest.mark.skip(reason="Pendiente reescribir tras refactor sync->async - deuda tecnica documentada")
-@patch("app.services.wazuhClientService.fetch_all_vulns", return_value=MOCK_VULN)
-def test_sync_all_success(mock_fetch, client, db_session):
+@patch("app.services.wazuhService.SessionLocal")
+@patch("app.services.wazuhProvider.WazuhVulnerabilityProvider.fetch_vulnerabilities_batches", return_value=[MOCK_VULN])
+def test_sync_all_success(mock_fetch, mock_session_local, client, db_session):
+    db_session.close = lambda: None
+    mock_session_local.return_value = db_session
     _create_user(db_session)
     _create_connection(db_session, name="conn-1")
     _create_connection(db_session, name="conn-2")
@@ -377,13 +384,15 @@ def test_sync_all_success(mock_fetch, client, db_session):
     assert "Sincronización global en segundo plano iniciada" in res.json()["message"]
 
 
-@pytest.mark.skip(reason="Pendiente reescribir tras refactor sync->async - deuda tecnica documentada")
-@patch("app.services.wazuhClientService.fetch_all_vulns", side_effect=Exception("unreachable"))
-def test_sync_all_partial_failure(mock_fetch, client, db_session):
+@patch("app.services.wazuhService.SessionLocal")
+@patch("app.services.wazuhProvider.WazuhVulnerabilityProvider.fetch_vulnerabilities_batches", side_effect=Exception("unreachable"))
+def test_sync_all_partial_failure(mock_fetch, mock_session_local, client, db_session):
+    db_session.close = lambda: None
+    mock_session_local.return_value = db_session
     _create_user(db_session)
     _create_connection(db_session)
-    result = client.post("/vulns/sync-all", headers=_get_headers(client)).json()[0]
-    assert result["ok"] is False
+    res = client.post("/vulns/sync-all", headers=_get_headers(client))
+    assert res.status_code == 202
 
 
 def test_sync_all_skips_inactive(client, db_session):
@@ -407,33 +416,39 @@ def test_list_vulns_unauthenticated(client):
     assert client.get("/vulns").status_code == 401
 
 
-@pytest.mark.skip(reason="Pendiente reescribir tras refactor sync->async - deuda tecnica documentada")
-@patch("app.services.wazuhClientService.fetch_all_vulns", return_value=MOCK_VULN)
-def test_list_vulns_limit_zero(mock_fetch, client, db_session):
+@patch("app.services.wazuhService.SessionLocal")
+@patch("app.services.wazuhProvider.WazuhVulnerabilityProvider.fetch_vulnerabilities_batches", return_value=[MOCK_VULN])
+def test_list_vulns_limit_zero(mock_fetch, mock_session_local, client, db_session):
+    db_session.close = lambda: None
+    mock_session_local.return_value = db_session
     _create_user(db_session)
     conn = _create_connection(db_session)
     client.post(f"/wazuh-connections/{conn.id}/sync", headers=_get_headers(client))
-    assert client.get("/vulns?limit=0", headers=_get_headers(client)).json() == []
+    assert client.get("/vulns?limit=0", headers=_get_headers(client)).json()["items"] == []
 
 
-@pytest.mark.skip(reason="Pendiente reescribir tras refactor sync->async - deuda tecnica documentada")
-@patch("app.services.wazuhClientService.fetch_all_vulns", return_value=MOCK_VULN)
-def test_list_vulns_shows_connection_name(mock_fetch, client, db_session):
+@patch("app.services.wazuhService.SessionLocal")
+@patch("app.services.wazuhProvider.WazuhVulnerabilityProvider.fetch_vulnerabilities_batches", return_value=[MOCK_VULN])
+def test_list_vulns_shows_connection_name(mock_fetch, mock_session_local, client, db_session):
+    db_session.close = lambda: None
+    mock_session_local.return_value = db_session
     # newly added test ensures connection_name field is returned
     _create_user(db_session)
     conn = _create_connection(db_session, name="myconn")
     client.post(f"/wazuh-connections/{conn.id}/sync", headers=_get_headers(client))
-    res_list = client.get("/vulns", headers=_get_headers(client)).json()
+    res_list = client.get("/vulns", headers=_get_headers(client)).json()["items"]
     assert len(res_list) == 1
     assert res_list[0].get("connection_name") == "myconn"
 
 
 # fetch vulns
 
-@pytest.mark.skip(reason="Pendiente reescribir tras refactor sync->async - deuda tecnica documentada")
-@patch("app.services.wazuhClientService.fetch_all_vulns")
-def test_new_vuln_creates_detected_history(mock_fetch, client, db_session):
-    mock_fetch.return_value = _raw_vuln()
+@patch("app.services.wazuhService.SessionLocal")
+@patch("app.services.wazuhProvider.WazuhVulnerabilityProvider.fetch_vulnerabilities_batches")
+def test_new_vuln_creates_detected_history(mock_fetch, mock_session_local, client, db_session):
+    db_session.close = lambda: None
+    mock_session_local.return_value = db_session
+    mock_fetch.return_value = [_raw_vuln()]
     _create_user(db_session)
     conn = _create_connection(db_session)
     client.post(f"/wazuh-connections/{conn.id}/sync", headers=_get_headers(client))
@@ -441,10 +456,12 @@ def test_new_vuln_creates_detected_history(mock_fetch, client, db_session):
     assert "DETECTED" in actions
 
 
-@pytest.mark.skip(reason="Pendiente reescribir tras refactor sync->async - deuda tecnica documentada")
-@patch("app.services.wazuhClientService.fetch_all_vulns")
-def test_resolved_vuln_gets_reopened(mock_fetch, client, db_session):
-    mock_fetch.return_value = _raw_vuln()
+@patch("app.services.wazuhService.SessionLocal")
+@patch("app.services.wazuhProvider.WazuhVulnerabilityProvider.fetch_vulnerabilities_batches")
+def test_resolved_vuln_gets_reopened(mock_fetch, mock_session_local, client, db_session):
+    db_session.close = lambda: None
+    mock_session_local.return_value = db_session
+    mock_fetch.return_value = [_raw_vuln()]
     _create_user(db_session)
     conn = _create_connection(db_session)
     headers = _get_headers(client)
@@ -459,45 +476,53 @@ def test_resolved_vuln_gets_reopened(mock_fetch, client, db_session):
     assert "REOPENED" in actions
 
 
-@pytest.mark.skip(reason="Pendiente reescribir tras refactor sync->async - deuda tecnica documentada")
-@patch("app.services.wazuhClientService.fetch_all_vulns")
-def test_vuln_resolved_when_absent_from_payload(mock_fetch, client, db_session):
-    mock_fetch.return_value = _raw_vuln()
+@patch("app.services.wazuhService.SessionLocal")
+@patch("app.services.wazuhProvider.WazuhVulnerabilityProvider.fetch_vulnerabilities_batches")
+def test_vuln_resolved_when_absent_from_payload(mock_fetch, mock_session_local, client, db_session):
+    db_session.close = lambda: None
+    mock_session_local.return_value = db_session
+    mock_fetch.return_value = [_raw_vuln()]
     _create_user(db_session)
     conn = _create_connection(db_session)
     headers = _get_headers(client)
     client.post(f"/wazuh-connections/{conn.id}/sync", headers=headers)
     mock_fetch.return_value = []
+    import time
+    time.sleep(1.1)
     client.post(f"/wazuh-connections/{conn.id}/sync", headers=headers)
     vuln = db_session.query(WazuhVulnerability).first()
     assert vuln.status == "RESOLVED"
 
 
-@pytest.mark.skip(reason="Pendiente reescribir tras refactor sync->async - deuda tecnica documentada")
-@patch("app.services.wazuhClientService.fetch_all_vulns")
-def test_severity_change_logged_in_history(mock_fetch, client, db_session):
-    mock_fetch.return_value = _raw_vuln(severity="Low")
+@patch("app.services.wazuhService.SessionLocal")
+@patch("app.services.wazuhProvider.WazuhVulnerabilityProvider.fetch_vulnerabilities_batches")
+def test_severity_change_logged_in_history(mock_fetch, mock_session_local, client, db_session):
+    db_session.close = lambda: None
+    mock_session_local.return_value = db_session
+    mock_fetch.return_value = [_raw_vuln(severity="Low")]
     _create_user(db_session)
     conn = _create_connection(db_session)
     headers = _get_headers(client)
     client.post(f"/wazuh-connections/{conn.id}/sync", headers=headers)
-    mock_fetch.return_value = _raw_vuln(severity="Critical")
+    mock_fetch.return_value = [_raw_vuln(severity="Critical")]
     client.post(f"/wazuh-connections/{conn.id}/sync", headers=headers)
     actions = [h.action for h in db_session.query(VulnerabilityHistory).all()]
     assert "SEVERITY_CHANGED" in actions
 
 
-@pytest.mark.skip(reason="Pendiente reescribir tras refactor sync->async - deuda tecnica documentada")
-@patch("app.services.wazuhClientService.fetch_all_vulns")
-def test_vuln_without_cve_id_is_skipped(mock_fetch, client, db_session):
-    mock_fetch.return_value = [{
+@patch("app.services.wazuhService.SessionLocal")
+@patch("app.services.wazuhProvider.WazuhVulnerabilityProvider.fetch_vulnerabilities_batches")
+def test_vuln_without_cve_id_is_skipped(mock_fetch, mock_session_local, client, db_session):
+    db_session.close = lambda: None
+    mock_session_local.return_value = db_session
+    mock_fetch.return_value = [[{
         "agent": {"id": "001", "name": "host-1"},
         "host": {"os": {}},
         "package": {"name": "curl", "version": "7.81"},
         "vulnerability": {"id": None, "severity": "High", "score": {}},
-    }]
+    }]]
     _create_user(db_session)
     conn = _create_connection(db_session)
     res = client.post(f"/wazuh-connections/{conn.id}/sync", headers=_get_headers(client))
-    assert res.json()["synced"] == 0
+    assert res.status_code == 202
     assert db_session.query(WazuhVulnerability).count() == 0
