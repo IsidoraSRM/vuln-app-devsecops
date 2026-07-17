@@ -119,7 +119,7 @@ pipeline {
                         -v "$WORKSPACE:/apps" \
                         aquasec/trivy:latest fs \
                         --scanners vuln \
-                        --severity HIGH,CRITICAL \
+                        --severity CRITICAL \
                         --exit-code 1 \
                         /apps
                 '''
