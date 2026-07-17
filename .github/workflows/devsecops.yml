@@ -209,6 +209,7 @@ jobs:
           token: ${{ secrets.GITHUB_TOKEN }}
           target: 'http://localhost:8000/docs'
           cmd_options: '-I'
+          allow_issue_writing: false
 
       - name: Upload ZAP HTML Report
         uses: actions/upload-artifact@v4
