@@ -10,7 +10,7 @@ from .models import User
 from .services.authService import hash_password
 from .metrics import metrics_app
 
-from .routers import authRouter, usersRouter, connectionsRouter, vulnerabilitiesRouter, systemRouter
+from .routers import authRouter, usersRouter, connectionsRouter, vulnerabilitiesRouter, systemRouter, metricsRouter
 
 try:
     from opentelemetry import trace
@@ -166,3 +166,4 @@ app.include_router(usersRouter.router)
 app.include_router(connectionsRouter.router)
 app.include_router(vulnerabilitiesRouter.router)
 app.include_router(systemRouter.router)
+app.include_router(metricsRouter.router)
