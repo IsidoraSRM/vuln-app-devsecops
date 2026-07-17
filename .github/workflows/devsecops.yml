@@ -146,7 +146,7 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Run Trivy SCA Scan
-        uses: aquasecurity/trivy-action@v0.28.0
+        uses: aquasecurity/trivy-action@v0.29.0
         with:
           scan-type: 'fs'
           scan-ref: '.'
@@ -176,19 +176,19 @@ jobs:
         run: |
           cp .env.example .env
           export ENCRYPTION_KEY=$(python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())")
+          export SECRET_KEY="supersecret"
           sed -i "s|^ENCRYPTION_KEY=.*|ENCRYPTION_KEY=$ENCRYPTION_KEY|g" .env
           
-          # Remove container_name to avoid potential naming conflicts in docker compose
+          # Remove container_name and inject variables explicitly into environment block
           python -c "
           with open('docker-compose.yml') as f:
-              lines = f.readlines()
-          out = []
-          for line in lines:
-              if 'container_name:' in line:
-                  continue
-              out.append(line)
+              content = f.read()
+          content = content.replace('DATABASE_URL: postgresql://\${POSTGRES_USER}:\${POSTGRES_PASSWORD}@db-api:5432/\${POSTGRES_DB}', 
+                                    'DATABASE_URL: postgresql://\${POSTGRES_USER}:\${POSTGRES_PASSWORD}@db-api:5432/\${POSTGRES_DB}\n      ENCRYPTION_KEY: \${ENCRYPTION_KEY}\n      SECRET_KEY: \${SECRET_KEY}')
+          lines = content.splitlines()
+          out = [line for line in lines if 'container_name:' not in line]
           with open('docker-compose.yml', 'w') as f:
-              f.writelines(out)
+              f.write('\n'.join(out) + '\n')
           "
           docker compose up -d db-api api
 
