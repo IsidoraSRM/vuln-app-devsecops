@@ -14,15 +14,12 @@ pipeline {
 
     stages {
 
-        stage('Checkout') {
+        stage('CI: Backend Tests & Coverage') {
             steps {
-                checkout scm
-            }
-        }
-
-        stage('Build and Unit Tests') {
-            steps {
-                echo 'Iniciando pruebas unitarias del Backend...'
+                // Levantamos un Postgres efimero en una red bridge para que main.py pueda
+                // conectarse al importarse. Los modelos usan composite PK con autoincrement,
+                // que SQLite no soporta, asi que PG es necesario incluso para que se cargue
+                // el modulo. El conftest.py de los tests sigue usando SQLite in-memory.
                 catchError(buildResult: 'SUCCESS', stageResult: 'UNSTABLE') {
                     sh '''
                         # Red bridge temporal para que el container de tests vea al de Postgres
@@ -67,9 +64,14 @@ pipeline {
                         exit $TEST_EXIT
                     '''
                 }
+            }
+        }
 
-                echo 'Iniciando pruebas unitarias y construcción del Frontend...'
+        stage('CI: Frontend Tests & Build') {
+            steps {
                 catchError(buildResult: 'SUCCESS', stageResult: 'UNSTABLE') {
+                    // Separamos tests y build con `;` en lugar de `&&` para que
+                    // el build siempre se intente, aunque algun test falle.
                     sh '''
                         docker run --rm \
                             -v "$WORKSPACE/frontend:/app" \
@@ -84,9 +86,8 @@ pipeline {
             }
         }
 
-        stage('SonarQube analysis') {
+        stage('SAST: SonarQube Code Analysis') {
             steps {
-                echo 'Ejecutando análisis SAST en SonarQube...'
                 withSonarQubeEnv('SonarQube') {
                     sh '''
                         docker run --rm \
@@ -100,15 +101,21 @@ pipeline {
                             -Dsonar.projectBaseDir=.
                     '''
                 }
+            }
+        }
 
-                echo 'Verificando Quality Gate en SonarQube...'
+        stage('GATE: SonarQube Quality Gate') {
+            steps {
                 catchError(buildResult: 'SUCCESS', stageResult: 'UNSTABLE') {
                     timeout(time: 1, unit: 'MINUTES') {
                         waitForQualityGate abortPipeline: false, credentialsId: 'sonar-token'
                     }
                 }
+            }
+        }
 
-                echo 'Ejecutando escaneo de vulnerabilidades SCA con Trivy...'
+        stage('SCA: Trivy Dependency Scan') {
+            steps {
                 catchError(buildResult: 'SUCCESS', stageResult: 'UNSTABLE') {
                     sh '''
                         docker run --rm \
@@ -120,8 +127,14 @@ pipeline {
                             /apps
                     '''
                 }
+            }
+        }
 
-                echo 'Ejecutando escaneo dinámico DAST con OWASP ZAP...'
+        stage('DAST: OWASP ZAP Dynamic Scan') {
+            steps {
+                // Baseline scan = pasivo, no ataca activamente. Rapido (~2-5 min).
+                // catchError no bloquea el pipeline si ZAP encuentra hallazgos.
+                // $ZAP_TARGET viene del bloque environment {}, lo expande Bash en la sh.
                 catchError(buildResult: 'SUCCESS', stageResult: 'UNSTABLE') {
                     sh '''
                         # 1. Asegurar que existe el archivo .env para docker compose
@@ -130,6 +143,7 @@ pipeline {
                         fi
                         
                         # 2. Modificar el archivo docker-compose dinámicamente usando Python
+                        # Esto elimina 'container_name' y 'ports' para evitar conflictos de nombres y puertos con los contenedores permanentes del host.
                         python3 -c '
 with open("docker-compose.yml") as f:
     lines = f.readlines()
@@ -191,40 +205,6 @@ with open("docker-compose.dast.yml", "w") as f:
                         exit $ZAP_EXIT
                     '''
                 }
-            }
-        }
-
-        stage('Build Docker Image and Push to Artifactory') {
-            steps {
-                echo 'Construyendo imágenes Docker locales para verificación...'
-                sh '''
-                    # Construir imagen de Backend
-                    docker build -t vuln-api:latest ./vuln-api
-
-                    # Construir imagen de Frontend
-                    docker build -t vuln-frontend:latest ./frontend
-                '''
-                echo 'Simulando subida de imágenes a Artifactory...'
-                echo 'Subiendo vuln-api:latest a docker.artifactory.local/vuln-app/api:latest...'
-                echo 'Subiendo vuln-frontend:latest a docker.artifactory.local/vuln-app/frontend:latest...'
-                echo 'Imágenes subidas exitosamente a Artifactory.'
-            }
-        }
-
-        stage('Approve K8s Dev Deployment') {
-            steps {
-                input message: '¿Desea aprobar el despliegue en el entorno de desarrollo (Kubernetes Dev)?', ok: 'Aprobar Despliegue'
-            }
-        }
-
-        stage('Create and Deploy to k8s Dev Environment') {
-            steps {
-                echo 'Creando Namespace de Kubernetes: vuln-app-dev...'
-                echo 'Aplicando manifiestos de Kubernetes (Deployments, Services, Ingress)...'
-                echo 'Desplegando base de datos y API en clúster k8s...'
-                echo 'Desplegando frontend en clúster k8s...'
-                echo 'Verificando estado de los Pods en Namespace vuln-app-dev...'
-                echo '¡Despliegue en Kubernetes Dev completado con éxito!'
             }
         }
     }
