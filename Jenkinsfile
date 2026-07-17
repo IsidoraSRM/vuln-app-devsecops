@@ -134,7 +134,7 @@ pipeline {
             steps {
                 // Baseline scan = pasivo, no ataca activamente. Rapido (~2-5 min).
                 // catchError no bloquea el pipeline si ZAP encuentra hallazgos.
-                // $ZAP_TARGET viene del bloque environment {}, lo expande Bash en la sh.
+                // $ZAP_TARGET viene del bloque environment {}, lo expande Bash en la sh.   prueba webhook
                 catchError(buildResult: 'SUCCESS', stageResult: 'UNSTABLE') {
                     sh '''
                         # 1. Asegurar que existe el archivo .env para docker compose
