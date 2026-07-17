@@ -145,7 +145,7 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@v4
 
-      - name: Run Trivy SCA Scan
+      - name: Run Trivy SCA Scan (Report HIGH and CRITICAL)
         uses: aquasecurity/trivy-action@v0.36.0
         with:
           scan-type: 'fs'
@@ -153,11 +153,21 @@ jobs:
           format: 'sarif'
           output: 'trivy-results.sarif'
           severity: 'HIGH,CRITICAL'
+          exit-code: '0'
 
       - name: Upload Trivy Scan Results
         uses: github/codeql-action/upload-sarif@v3
         with:
           sarif_file: 'trivy-results.sarif'
+
+      - name: Run Trivy SCA Scan (Fail on CRITICAL)
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          scan-type: 'fs'
+          scan-ref: '.'
+          format: 'table'
+          severity: 'CRITICAL'
+          exit-code: '1'
 
   owasp-zap-dast:
     name: OWASP ZAP DAST Scan
