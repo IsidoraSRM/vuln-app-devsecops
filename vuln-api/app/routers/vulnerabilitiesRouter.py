@@ -140,7 +140,10 @@ def get_unique_filters(connection_id: Optional[int] = None, db: Session = Depend
         os_list = [{"platform": r[0], "version": r[1]} for r in os_res if r[0]]
 
     except Exception:
-        # Fallback para desarrollo local con SQLite sin vistas materializadas
+        # Fallback para desarrollo local con SQLite sin vistas materializadas.
+        # El rollback es obligatorio: en PostgreSQL la transacción queda abortada
+        # tras el fallo del try y sin él las consultas del fallback también fallan.
+        db.rollback()
         query = db.query(WazuhVulnerability)
         if connection_id:
             query = query.filter(WazuhVulnerability.connection_id == connection_id)
