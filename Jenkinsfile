@@ -106,27 +106,23 @@ pipeline {
 
         stage('GATE: SonarQube Quality Gate') {
             steps {
-                catchError(buildResult: 'SUCCESS', stageResult: 'UNSTABLE') {
-                    timeout(time: 1, unit: 'MINUTES') {
-                        waitForQualityGate abortPipeline: false, credentialsId: 'sonar-token'
-                    }
+                timeout(time: 1, unit: 'MINUTES') {
+                    waitForQualityGate abortPipeline: true, credentialsId: 'sonar-token'
                 }
             }
         }
 
         stage('SCA: Trivy Dependency Scan') {
             steps {
-                catchError(buildResult: 'SUCCESS', stageResult: 'UNSTABLE') {
-                    sh '''
-                        docker run --rm \
-                            -v "$WORKSPACE:/apps" \
-                            aquasec/trivy:latest fs \
-                            --scanners vuln \
-                            --severity HIGH,CRITICAL \
-                            --exit-code 0 \
-                            /apps
-                    '''
-                }
+                sh '''
+                    docker run --rm \
+                        -v "$WORKSPACE:/apps" \
+                        aquasec/trivy:latest fs \
+                        --scanners vuln \
+                        --severity HIGH,CRITICAL \
+                        --exit-code 1 \
+                        /apps
+                '''
             }
         }
 
