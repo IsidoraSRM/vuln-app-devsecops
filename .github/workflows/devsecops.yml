@@ -44,7 +44,7 @@ jobs:
       - name: Run Pytest with Coverage
         run: |
           cd vuln-api
-          export ENCRYPTION_KEY=$(python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())")
+          export ENCRYPTION_KEY=$(python -c "import base64, os; print(base64.urlsafe_b64encode(os.urandom(32)).decode())")
           export DATABASE_URL="postgresql://test:test@localhost:5432/test"
           python -m pytest --cov=app --cov-report=xml:coverage.xml --junitxml=test-results.xml tests/
 
@@ -175,7 +175,7 @@ jobs:
       - name: Start Services under Docker Compose
         run: |
           cp .env.example .env
-          export ENCRYPTION_KEY=$(python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())")
+          export ENCRYPTION_KEY=$(python -c "import base64, os; print(base64.urlsafe_b64encode(os.urandom(32)).decode())")
           export SECRET_KEY="supersecret"
           sed -i "s|^ENCRYPTION_KEY=.*|ENCRYPTION_KEY=$ENCRYPTION_KEY|g" .env
           
