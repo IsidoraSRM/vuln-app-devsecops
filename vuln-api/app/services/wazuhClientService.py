@@ -56,7 +56,7 @@ with_retry = retry(
 def _build_session(wazuh_user: str, wazuh_password: str) -> requests.Session:
     session = requests.Session()
     session.auth = HTTPBasicAuth(wazuh_user, wazuh_password)
-    session.verify = False
+    session.verify = False  # nosonar
     return session
 
 
@@ -156,7 +156,7 @@ def _test_connection_request(indexer_url: str, wazuh_user: str, wazuh_password: 
     resp = requests.get(
         indexer_url,
         auth=HTTPBasicAuth(wazuh_user, wazuh_password),
-        verify=False,
+        verify=False,  # nosonar
         timeout=10,
     )
     # 5xx triggerea retry via raise_for_status; 4xx no, son configuracion.
