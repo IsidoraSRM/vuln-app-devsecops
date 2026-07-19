@@ -46,14 +46,14 @@ pipeline {
                         # Correr pytest contra el PG efimero
                         docker run --rm \
                             --network ci-pg-net-$BUILD_NUMBER \
-                            -v "$WORKSPACE/vuln-api:/app" \
-                            -w /app \
-                            -e PYTHONPATH=/app \
+                            -v "$WORKSPACE:/workspace" \
+                            -w /workspace \
+                            -e PYTHONPATH=/workspace/vuln-api \
                             -e DATABASE_URL="postgresql://test:test@pg-test-$BUILD_NUMBER:5432/test" \
                             python:3.12-slim bash -c '
-                                pip install --no-cache-dir -q -r requirements.txt &&
+                                pip install --no-cache-dir -q -r vuln-api/requirements.txt &&
                                 export ENCRYPTION_KEY=$(python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())") &&
-                                pytest --cov=app --cov-report=xml:coverage.xml --junitxml=test-results.xml tests/
+                                pytest --cov=vuln-api/app --cov-report=xml:vuln-api/coverage.xml --junitxml=vuln-api/test-results.xml vuln-api/tests/
                             '
                         TEST_EXIT=$?
 

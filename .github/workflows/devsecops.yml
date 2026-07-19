@@ -37,16 +37,15 @@ jobs:
 
       - name: Install dependencies
         run: |
-          cd vuln-api
-          pip install --no-cache-dir -r requirements.txt
+          pip install --no-cache-dir -r vuln-api/requirements.txt
           pip install pytest pytest-cov
 
       - name: Run Pytest with Coverage
         run: |
-          cd vuln-api
           export ENCRYPTION_KEY=$(python -c "import base64, os; print(base64.urlsafe_b64encode(os.urandom(32)).decode())")
           export DATABASE_URL="postgresql://test:test@localhost:5432/test"
-          python -m pytest --cov=app --cov-report=xml:coverage.xml --junitxml=test-results.xml tests/
+          export PYTHONPATH=$GITHUB_WORKSPACE/vuln-api
+          python -m pytest --cov=vuln-api/app --cov-report=xml:vuln-api/coverage.xml --junitxml=vuln-api/test-results.xml vuln-api/tests/
 
       - name: Upload Backend Coverage
         uses: actions/upload-artifact@v4
