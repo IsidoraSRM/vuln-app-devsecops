@@ -146,16 +146,20 @@ jobs:
           gh issue create \
             --title "🔴 [DEUDA TÉCNICA] SonarQube Quality Gate falló en la rama '${{ github.ref_name }}'" \
             --body "El Quality Gate de SonarQube ha fallado. Revisa los detalles del reporte en SonarQube: http://18.218.47.7:9000. Este ticket fue autogenerado por el Pipeline de DevSecOps para mitigar la vulnerabilidad." \
-            --label "bug,security,deuda-tecnica"
+            --label "bug"
 
       - name: Notify Slack on Quality Gate Failure
         if: failure()
         run: |
-          curl -X POST -H 'Content-type: application/json' \
-            --data '{
-              "text": "🚨 *DevSecOps Pipeline Alert*: El Quality Gate de SonarQube ha fallado en la rama *${{ github.ref_name }}*. Se ha creado automáticamente un ticket de Deuda Técnica en el backlog para su asignación e investigación inmediata."
-            }' \
-            ${{ secrets.SLACK_WEBHOOK_URL }}
+          if [ -n "${{ secrets.SLACK_WEBHOOK_URL }}" ]; then
+            curl -X POST -H 'Content-type: application/json' \
+              --data '{
+                "text": "🚨 *DevSecOps Pipeline Alert*: El Quality Gate de SonarQube ha fallado en la rama *${{ github.ref_name }}*. Se ha creado automáticamente un ticket de Deuda Técnica en el backlog para su asignación e investigación inmediata."
+              }' \
+              "${{ secrets.SLACK_WEBHOOK_URL }}"
+          else
+            echo "SLACK_WEBHOOK_URL no está configurado. Saltando notificación de Slack..."
+          fi
 
   trivy-sca:
     name: Trivy SCA Dependency Scan
