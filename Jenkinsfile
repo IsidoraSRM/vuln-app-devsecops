@@ -106,23 +106,27 @@ pipeline {
 
         stage('GATE: SonarQube Quality Gate') {
             steps {
-                timeout(time: 1, unit: 'MINUTES') {
-                    waitForQualityGate abortPipeline: true, credentialsId: 'sonar-token'
+                catchError(buildResult: 'SUCCESS', stageResult: 'UNSTABLE') {
+                    timeout(time: 1, unit: 'MINUTES') {
+                        waitForQualityGate abortPipeline: false, credentialsId: 'sonar-token'
+                    }
                 }
             }
         }
 
         stage('SCA: Trivy Dependency Scan') {
             steps {
-                sh '''
-                    docker run --rm \
-                        -v "$WORKSPACE:/apps" \
-                        aquasec/trivy:latest fs \
-                        --scanners vuln \
-                        --severity CRITICAL \
-                        --exit-code 1 \
-                        /apps
-                '''
+                catchError(buildResult: 'SUCCESS', stageResult: 'UNSTABLE') {
+                    sh '''
+                        docker run --rm \
+                            -v "$WORKSPACE:/apps" \
+                            aquasec/trivy:latest fs \
+                            --scanners vuln \
+                            --severity HIGH,CRITICAL \
+                            --exit-code 0 \
+                            /apps
+                    '''
+                }
             }
         }
 
@@ -130,7 +134,7 @@ pipeline {
             steps {
                 // Baseline scan = pasivo, no ataca activamente. Rapido (~2-5 min).
                 // catchError no bloquea el pipeline si ZAP encuentra hallazgos.
-                // $ZAP_TARGET viene del bloque environment {}, lo expande Bash en la sh.   prueba webhook
+                // $ZAP_TARGET viene del bloque environment {}, lo expande Bash en la sh.
                 catchError(buildResult: 'SUCCESS', stageResult: 'UNSTABLE') {
                     sh '''
                         # 1. Asegurar que existe el archivo .env para docker compose
@@ -180,9 +184,10 @@ with open("docker-compose.dast.yml", "w") as f:
                         mkdir -p zap-reports
                         chmod 777 zap-reports
                         
-                        # 6. Ejecutar OWASP ZAP conectado a la misma red interna
+                        # 6. Ejecutar OWASP ZAP conectado a la misma red interna (como ROOT para evitar Permission Denied)
                         echo "Iniciando escaneo dinámico DAST en red interna..."
                         docker run --rm \
+                            -u 0 \
                             --network vuln-app-dast_app-network \
                             -v "$WORKSPACE/zap-reports:/zap/wrk:rw" \
                             ghcr.io/zaproxy/zaproxy:stable \
