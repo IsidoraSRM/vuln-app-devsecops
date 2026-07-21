@@ -221,10 +221,20 @@ with open("docker-compose.dast.yml", "w") as f:
                         cp .env.example .env
                     fi
 
-                    # 2. Reconstruir e iniciar contenedores de producción (api, frontend, db-api)
+                    # 2. Asegurar que la carpeta y certificados SSL existan para Nginx
+                    if [ ! -f ./nginx/ssl/nginx-selfsigned.crt ]; then
+                        echo "Generando certificados SSL autofirmados para Nginx..."
+                        mkdir -p ./nginx/ssl
+                        openssl req -x509 -nodes -days 365 -newkey rsa:2048 \
+                            -keyout ./nginx/ssl/nginx-selfsigned.key \
+                            -out ./nginx/ssl/nginx-selfsigned.crt \
+                            -subj "/C=CL/ST=RM/L=Santiago/O=Desarrollo/CN=localhost" 2>/dev/null
+                    fi
+
+                    # 3. Reconstruir e iniciar contenedores de producción (api, frontend, db-api)
                     docker compose up -d --build
 
-                    # 3. Limpiar imágenes huérfanas/antiguas para ahorrar espacio en la VM
+                    # 4. Limpiar imágenes huérfanas/antiguas para ahorrar espacio en la VM
                     docker image prune -f
                 '''
             }
