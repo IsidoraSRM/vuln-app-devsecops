@@ -221,14 +221,17 @@ with open("docker-compose.dast.yml", "w") as f:
                         cp .env.example .env
                     fi
 
-                    # 2. Asegurar que la carpeta y certificados SSL existan para Nginx
+                    # 2. Asegurar que la carpeta y certificados SSL existan para Nginx (usando Docker para evitar problemas de permisos del host)
                     if [ ! -f ./nginx/ssl/nginx-selfsigned.crt ]; then
-                        echo "Generando certificados SSL autofirmados para Nginx..."
-                        mkdir -p ./nginx/ssl
-                        openssl req -x509 -nodes -days 365 -newkey rsa:2048 \
-                            -keyout ./nginx/ssl/nginx-selfsigned.key \
-                            -out ./nginx/ssl/nginx-selfsigned.crt \
-                            -subj "/C=CL/ST=RM/L=Santiago/O=Desarrollo/CN=localhost" 2>/dev/null
+                        echo "Generando certificados SSL autofirmados para Nginx usando Docker..."
+                        docker run --rm -v "$(pwd):/workspace" alpine sh -c "
+                            mkdir -p /workspace/nginx/ssl && \
+                            apk add --no-cache openssl && \
+                            openssl req -x509 -nodes -days 365 -newkey rsa:2048 \
+                                -keyout /workspace/nginx/ssl/nginx-selfsigned.key \
+                                -out /workspace/nginx/ssl/nginx-selfsigned.crt \
+                                -subj '/C=CL/ST=RM/L=Santiago/O=Desarrollo/CN=localhost'
+                        "
                     fi
 
                     # 3. Reconstruir e iniciar contenedores de producción (api, frontend, db-api)
