@@ -211,6 +211,24 @@ with open("docker-compose.dast.yml", "w") as f:
                 }
             }
         }
+
+        stage('CD: Deploy to Production') {
+            steps {
+                echo '🚀 Desplegando versión actualizada en los contenedores de producción...'
+                sh '''
+                    # 1. Asegurar que existe el archivo .env
+                    if [ ! -f .env ]; then
+                        cp .env.example .env
+                    fi
+
+                    # 2. Reconstruir e iniciar contenedores de producción (api, frontend, db-api)
+                    docker compose up -d --build
+
+                    # 3. Limpiar imágenes huérfanas/antiguas para ahorrar espacio en la VM
+                    docker image prune -f
+                '''
+            }
+        }
     }
 
     post {
