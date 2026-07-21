@@ -7,11 +7,6 @@ pipeline {
         buildDiscarder(logRotator(numToKeepStr: '10'))
     }
 
-    environment {
-        // Target URL del DAST (Wazuh dashboard publico). Cambiar si conviene.
-        ZAP_TARGET = 'http://18.218.47.7'
-    }
-
     stages {
 
         stage('CI: Backend Tests & Coverage') {
@@ -115,6 +110,17 @@ pipeline {
         stage('SCA: Trivy Dependency Scan') {
             steps {
                 sh '''
+                    # Pasada 1 (informativa): reporta HIGH y CRITICAL sin romper el build.
+                    # Asi las HIGH quedan visibles en el log en vez de pasar invisibles.
+                    docker run --rm \
+                        -v "$WORKSPACE:/apps" \
+                        aquasec/trivy:latest fs \
+                        --scanners vuln \
+                        --severity HIGH,CRITICAL \
+                        --exit-code 0 \
+                        /apps
+
+                    # Pasada 2 (bloqueante): solo las CRITICAL rompen el build.
                     docker run --rm \
                         -v "$WORKSPACE:/apps" \
                         aquasec/trivy:latest fs \
@@ -128,9 +134,9 @@ pipeline {
 
         stage('DAST: OWASP ZAP Dynamic Scan') {
             steps {
-                // Baseline scan = pasivo, no ataca activamente. Rapido (~2-5 min).
+                // API scan sobre openapi.json: ZAP lee el catalogo de endpoints y prueba
+                // cada uno (activo: inyeccion, XSS, etc.), no solo la portada estatica de /docs.
                 // catchError no bloquea el pipeline si ZAP encuentra hallazgos.
-                // $ZAP_TARGET viene del bloque environment {}, lo expande Bash en la sh.
                 catchError(buildResult: 'SUCCESS', stageResult: 'UNSTABLE') {
                     sh '''
                         # 1. Asegurar que existe el archivo .env para docker compose
@@ -180,15 +186,16 @@ with open("docker-compose.dast.yml", "w") as f:
                         mkdir -p zap-reports
                         chmod 777 zap-reports
                         
-                        # 6. Ejecutar OWASP ZAP conectado a la misma red interna (como ROOT para evitar Permission Denied)
-                        echo "Iniciando escaneo dinámico DAST en red interna..."
+                        # 6. Ejecutar OWASP ZAP en modo API sobre openapi.json (como ROOT para evitar Permission Denied)
+                        echo "Iniciando escaneo dinámico DAST (modo API) en red interna..."
                         docker run --rm \
                             -u 0 \
                             --network vuln-app-dast_app-network \
                             -v "$WORKSPACE/zap-reports:/zap/wrk:rw" \
                             ghcr.io/zaproxy/zaproxy:stable \
-                            zap-baseline.py \
-                                -t "http://api:8000/docs" \
+                            zap-api-scan.py \
+                                -t "http://api:8000/openapi.json" \
+                                -f openapi \
                                 -r zap-report.html \
                                 -J zap-report.json \
                                 -I
