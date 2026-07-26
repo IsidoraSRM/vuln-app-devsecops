@@ -29,6 +29,7 @@ def list_vulns(
     cve_id: Optional[List[str]] = Query(None),
     package_name: Optional[List[str]] = Query(None),
     severity: Optional[List[str]] = Query(None),
+    os_platform: Optional[List[str]] = Query(None),
     score_min: Optional[float] = None,
     score_max: Optional[float] = None,
     sort_key: Optional[str] = 'last_seen',
@@ -48,6 +49,8 @@ def list_vulns(
         query = query.filter(WazuhVulnerability.package_name.in_(package_name))
     if severity:
         query = query.filter(func.upper(WazuhVulnerability.severity).in_([s.upper() for s in severity]))
+    if os_platform:
+        query = query.filter(WazuhVulnerability.os_platform.in_(os_platform))
     if score_min is not None:
         query = query.filter(WazuhVulnerability.score_base >= score_min)
     if score_max is not None:
