@@ -11,3 +11,8 @@ certbot/*
 
 # Entornos virtuales y credenciales
 .env
+
+# Certificados TLS: se generan al desplegar (iniciar_app.sh con openssl),
+# nunca deben versionarse. Una llave privada en git es una fuga de credenciales.
+nginx/ssl/*.key
+nginx/ssl/*.crt

@@ -1,0 +1,6 @@
+# Hace que coverage.xml use rutas RELATIVAS al directorio de trabajo.
+# Sin esto, el reporte trae rutas absolutas del contenedor donde corrió pytest
+# (/app, /workspace, C:\...) que el escaner de SonarQube no puede resolver:
+# "ERROR: Cannot resolve 25 file paths, ignoring coverage measures" -> cobertura 0%.
+[run]
+relative_files = True

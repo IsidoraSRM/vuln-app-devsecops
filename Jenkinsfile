@@ -7,11 +7,6 @@ pipeline {
         buildDiscarder(logRotator(numToKeepStr: '10'))
     }
 
-    environment {
-        // Target URL del DAST (Wazuh dashboard publico). Cambiar si conviene.
-        ZAP_TARGET = 'http://18.218.47.7'
-    }
-
     stages {
 
         stage('CI: Backend Tests & Coverage') {
@@ -46,14 +41,14 @@ pipeline {
                         # Correr pytest contra el PG efimero
                         docker run --rm \
                             --network ci-pg-net-$BUILD_NUMBER \
-                            -v "$WORKSPACE/vuln-api:/app" \
-                            -w /app \
-                            -e PYTHONPATH=/app \
+                            -v "$WORKSPACE:/workspace" \
+                            -w /workspace \
+                            -e PYTHONPATH=/workspace/vuln-api \
                             -e DATABASE_URL="postgresql://test:test@pg-test-$BUILD_NUMBER:5432/test" \
                             python:3.12-slim bash -c '
-                                pip install --no-cache-dir -q -r requirements.txt &&
+                                pip install --no-cache-dir -q -r vuln-api/requirements.txt &&
                                 export ENCRYPTION_KEY=$(python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())") &&
-                                pytest --cov=app --cov-report=xml:coverage.xml --junitxml=test-results.xml tests/
+                                pytest --cov=vuln-api/app --cov-report=xml:vuln-api/coverage.xml --junitxml=vuln-api/test-results.xml vuln-api/tests/
                             '
                         TEST_EXIT=$?
 
@@ -106,35 +101,42 @@ pipeline {
 
         stage('GATE: SonarQube Quality Gate') {
             steps {
-                catchError(buildResult: 'SUCCESS', stageResult: 'UNSTABLE') {
-                    timeout(time: 1, unit: 'MINUTES') {
-                        waitForQualityGate abortPipeline: false, credentialsId: 'sonar-token'
-                    }
+                timeout(time: 1, unit: 'MINUTES') {
+                    waitForQualityGate abortPipeline: true, credentialsId: 'sonar-token'
                 }
             }
         }
 
         stage('SCA: Trivy Dependency Scan') {
             steps {
-                catchError(buildResult: 'SUCCESS', stageResult: 'UNSTABLE') {
-                    sh '''
-                        docker run --rm \
-                            -v "$WORKSPACE:/apps" \
-                            aquasec/trivy:latest fs \
-                            --scanners vuln \
-                            --severity HIGH,CRITICAL \
-                            --exit-code 0 \
-                            /apps
-                    '''
-                }
+                sh '''
+                    # Pasada 1 (informativa): reporta HIGH y CRITICAL sin romper el build.
+                    # Asi las HIGH quedan visibles en el log en vez de pasar invisibles.
+                    docker run --rm \
+                        -v "$WORKSPACE:/apps" \
+                        aquasec/trivy:latest fs \
+                        --scanners vuln \
+                        --severity HIGH,CRITICAL \
+                        --exit-code 0 \
+                        /apps
+
+                    # Pasada 2 (bloqueante): solo las CRITICAL rompen el build.
+                    docker run --rm \
+                        -v "$WORKSPACE:/apps" \
+                        aquasec/trivy:latest fs \
+                        --scanners vuln \
+                        --severity CRITICAL \
+                        --exit-code 1 \
+                        /apps
+                '''
             }
         }
 
         stage('DAST: OWASP ZAP Dynamic Scan') {
             steps {
-                // Baseline scan = pasivo, no ataca activamente. Rapido (~2-5 min).
+                // API scan sobre openapi.json: ZAP lee el catalogo de endpoints y prueba
+                // cada uno (activo: inyeccion, XSS, etc.), no solo la portada estatica de /docs.
                 // catchError no bloquea el pipeline si ZAP encuentra hallazgos.
-                // $ZAP_TARGET viene del bloque environment {}, lo expande Bash en la sh.
                 catchError(buildResult: 'SUCCESS', stageResult: 'UNSTABLE') {
                     sh '''
                         # 1. Asegurar que existe el archivo .env para docker compose
@@ -184,14 +186,16 @@ with open("docker-compose.dast.yml", "w") as f:
                         mkdir -p zap-reports
                         chmod 777 zap-reports
                         
-                        # 6. Ejecutar OWASP ZAP conectado a la misma red interna
-                        echo "Iniciando escaneo dinámico DAST en red interna..."
+                        # 6. Ejecutar OWASP ZAP en modo API sobre openapi.json (como ROOT para evitar Permission Denied)
+                        echo "Iniciando escaneo dinámico DAST (modo API) en red interna..."
                         docker run --rm \
+                            -u 0 \
                             --network vuln-app-dast_app-network \
                             -v "$WORKSPACE/zap-reports:/zap/wrk:rw" \
                             ghcr.io/zaproxy/zaproxy:stable \
-                            zap-baseline.py \
-                                -t "http://api:8000/docs" \
+                            zap-api-scan.py \
+                                -t "http://api:8000/openapi.json" \
+                                -f openapi \
                                 -r zap-report.html \
                                 -J zap-report.json \
                                 -I
@@ -205,6 +209,37 @@ with open("docker-compose.dast.yml", "w") as f:
                         exit $ZAP_EXIT
                     '''
                 }
+            }
+        }
+
+        stage('CD: Deploy to Production') {
+            steps {
+                echo '🚀 Desplegando versión actualizada en los contenedores de producción...'
+                sh '''
+                    # 1. Asegurar que existe el archivo .env
+                    if [ ! -f .env ]; then
+                        cp .env.example .env
+                    fi
+
+                    # 2. Asegurar que la carpeta y certificados SSL existan para Nginx (usando Docker para evitar problemas de permisos del host)
+                    if [ ! -f ./nginx/ssl/nginx-selfsigned.crt ]; then
+                        echo "Generando certificados SSL autofirmados para Nginx usando Docker..."
+                        docker run --rm -v "$(pwd):/workspace" alpine sh -c "
+                            mkdir -p /workspace/nginx/ssl && \
+                            apk add --no-cache openssl && \
+                            openssl req -x509 -nodes -days 365 -newkey rsa:2048 \
+                                -keyout /workspace/nginx/ssl/nginx-selfsigned.key \
+                                -out /workspace/nginx/ssl/nginx-selfsigned.crt \
+                                -subj '/C=CL/ST=RM/L=Santiago/O=Desarrollo/CN=localhost'
+                        "
+                    fi
+
+                    # 3. Reconstruir e iniciar contenedores de producción (api, frontend, db-api)
+                    docker compose up -d --build
+
+                    # 4. Limpiar imágenes huérfanas/antiguas para ahorrar espacio en la VM
+                    docker image prune -f
+                '''
             }
         }
     }
