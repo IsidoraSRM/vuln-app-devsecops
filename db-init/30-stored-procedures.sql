@@ -25,6 +25,17 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
+-- Filtro SOLO por Sistema Operativo
+CREATE OR REPLACE FUNCTION sp_filter_by_os(p_os_platform TEXT) 
+RETURNS TABLE(id INT, agent_name VARCHAR, cve_id TEXT, severity TEXT, os_platform TEXT, status VARCHAR, first_seen TIMESTAMP WITH TIME ZONE) AS $$
+BEGIN
+    RETURN QUERY 
+    SELECT v.id, v.agent_name, v.cve_id, v.severity, v.os_platform, v.status, v.first_seen
+    FROM wazuh_vulnerabilities v 
+    WHERE v.os_platform ILIKE '%' || p_os_platform || '%';
+END;
+$$ LANGUAGE plpgsql;
+
 -- 3. PROCEDIMIENTO ALMACENADO GENERAL (Combina múltiples filtros dinámicamente)
 -- Este procedimiento aprovecha los índices creados arriba.
 CREATE OR REPLACE FUNCTION sp_filter_vulnerabilities(
