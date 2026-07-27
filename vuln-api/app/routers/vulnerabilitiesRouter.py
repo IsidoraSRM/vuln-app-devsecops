@@ -67,6 +67,8 @@ def list_vulns(
         valid_ids = [r[0] for r in sp_results]
     except Exception as e:
         # Fallback en caso de que el procedimiento no esté creado en la BD
+        # El rollback es VITAL en PostgreSQL, si no la transacción se bloquea.
+        db.rollback()
         valid_ids = None
 
     query = db.query(WazuhVulnerability)
