@@ -27,15 +27,15 @@ def _seed(db):
     db.commit()
     db.refresh(conn)
     rows = [
-        ("CVE-2026-0001", "host-a", "openssl", "Critical", 9.8),
-        ("CVE-2026-0002", "host-a", "curl", "High", 7.5),
-        ("CVE-2026-0003", "host-b", "bash", "Low", 3.1),
+        ("CVE-2026-0001", "host-a", "openssl", "Critical", 9.8, "ubuntu"),
+        ("CVE-2026-0002", "host-a", "curl", "High", 7.5, "ubuntu"),
+        ("CVE-2026-0003", "host-b", "bash", "Low", 3.1, "windows"),
     ]
-    for cve, agent, pkg, sev, score in rows:
+    for cve, agent, pkg, sev, score, platform in rows:
         db.add(WazuhVulnerability(
             connection_id=conn.id, status="ACTIVE", agent_id="001",
             agent_name=agent, package_name=pkg, package_version="1.0",
-            cve_id=cve, severity=sev, score_base=score,
+            cve_id=cve, severity=sev, score_base=score, os_platform=platform,
         ))
     db.commit()
     return conn
@@ -114,3 +114,24 @@ def test_pagination_totals(client, db_session):
 
     res = client.get("/vulns?limit=2&page=2", headers=headers)
     assert len(res.json()["items"]) == 1
+
+
+def test_filter_by_os_platform(client, db_session):
+    _create_user(db_session)
+    _seed(db_session)
+    headers = _get_headers(client)
+
+    # 1. Filtro simple por una sola plataforma (ubuntu)
+    res = client.get("/vulns?os_platform=ubuntu", headers=headers)
+    assert res.status_code == 200
+    assert sorted(_cves(res)) == ["CVE-2026-0001", "CVE-2026-0002"]
+
+    # 2. Filtro simple por windows
+    res = client.get("/vulns?os_platform=windows", headers=headers)
+    assert res.status_code == 200
+    assert _cves(res) == ["CVE-2026-0003"]
+
+    # 3. Filtro compuesto por múltiples plataformas (ubuntu y windows)
+    res = client.get("/vulns?os_platform=ubuntu&os_platform=windows", headers=headers)
+    assert res.status_code == 200
+    assert sorted(_cves(res)) == ["CVE-2026-0001", "CVE-2026-0002", "CVE-2026-0003"]
