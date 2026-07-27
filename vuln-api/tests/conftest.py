@@ -86,3 +86,4 @@ def client(db_session):
     
     # Limpiar los overrides después del test
     app.dependency_overrides.clear()
+    
