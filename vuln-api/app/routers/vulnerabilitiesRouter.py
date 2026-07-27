@@ -41,31 +41,68 @@ def list_vulns(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
+    # 1. Ejecutar el Procedimiento Almacenado para el filtrado masivo
+    days_ago = None
+    if detected_after:
+        now = datetime.utcnow()
+        if detected_after.tzinfo:
+            now = datetime.now(detected_after.tzinfo)
+        days_ago = max(0, (now - detected_after).days)
+
+    sp_query = text("""
+        SELECT id FROM sp_filter_vulnerabilities(
+            :sevs, :oses, :statuses, :agents, :days_ago
+        )
+    """)
+    sp_params = {
+        "sevs": severity,
+        "oses": os_platform,
+        "statuses": [status] if status else None,
+        "agents": agent_name,
+        "days_ago": days_ago
+    }
+    
+    try:
+        sp_results = db.execute(sp_query, sp_params).fetchall()
+        valid_ids = [r[0] for r in sp_results]
+    except Exception as e:
+        # Fallback en caso de que el procedimiento no esté creado en la BD
+        valid_ids = None
+
     query = db.query(WazuhVulnerability)
     
+    # Si el SP se ejecutó exitosamente, usamos los IDs que filtró
+    if valid_ids is not None:
+        if not valid_ids:
+            query = query.filter(WazuhVulnerability.id == -1) # Forzar vacío
+        else:
+            query = query.filter(WazuhVulnerability.id.in_(valid_ids))
+    else:
+        # Lógica original (Fallback)
+        if agent_name:
+            query = query.filter(WazuhVulnerability.agent_name.in_(agent_name))
+        if severity:
+            query = query.filter(func.upper(WazuhVulnerability.severity).in_([s.upper() for s in severity]))
+        if os_platform:
+            query = query.filter(WazuhVulnerability.os_platform.in_(os_platform))
+        if status:
+            query = query.filter(func.upper(WazuhVulnerability.status) == status.upper())
+        if detected_after:
+            query = query.filter(WazuhVulnerability.first_seen >= detected_after)
+        if detected_before:
+            query = query.filter(WazuhVulnerability.first_seen <= detected_before)
+
+    # Filtros adicionales que no están en el SP general
     if connection_id:
         query = query.filter(WazuhVulnerability.connection_id == connection_id)
-    if agent_name:
-        query = query.filter(WazuhVulnerability.agent_name.in_(agent_name))
     if cve_id:
         query = query.filter(WazuhVulnerability.cve_id.in_(cve_id))
     if package_name:
         query = query.filter(WazuhVulnerability.package_name.in_(package_name))
-    if severity:
-        query = query.filter(func.upper(WazuhVulnerability.severity).in_([s.upper() for s in severity]))
-    if os_platform:
-        query = query.filter(WazuhVulnerability.os_platform.in_(os_platform))
     if score_min is not None:
         query = query.filter(WazuhVulnerability.score_base >= score_min)
     if score_max is not None:
         query = query.filter(WazuhVulnerability.score_base <= score_max)
-
-    if status:
-        query = query.filter(func.upper(WazuhVulnerability.status) == status.upper())
-    if detected_after:
-        query = query.filter(WazuhVulnerability.first_seen >= detected_after)
-    if detected_before:
-        query = query.filter(WazuhVulnerability.first_seen <= detected_before)
 
     total_count = query.count()
 

@@ -4,6 +4,7 @@ CREATE INDEX IF NOT EXISTS idx_vuln_severity ON wazuh_vulnerabilities(severity);
 CREATE INDEX IF NOT EXISTS idx_vuln_status ON wazuh_vulnerabilities(status);
 CREATE INDEX IF NOT EXISTS idx_vuln_os_platform ON wazuh_vulnerabilities(os_platform);
 CREATE INDEX IF NOT EXISTS idx_vuln_first_seen ON wazuh_vulnerabilities(first_seen);
+CREATE INDEX IF NOT EXISTS idx_vuln_agent_name ON wazuh_vulnerabilities(agent_name);
 
 -- 2. PROCEDIMIENTOS ALMACENADOS INDIVIDUALES (Para máxima modularidad)
 
@@ -29,48 +30,41 @@ $$ LANGUAGE plpgsql;
 CREATE OR REPLACE FUNCTION sp_filter_by_os(p_os_platform TEXT) 
 RETURNS TABLE(id INT, agent_name VARCHAR, cve_id TEXT, severity TEXT, os_platform TEXT, status VARCHAR, first_seen TIMESTAMP WITH TIME ZONE) AS $$
 BEGIN
-    RETURN QUERY 
-    SELECT v.id, v.agent_name, v.cve_id, v.severity, v.os_platform, v.status, v.first_seen
-    FROM wazuh_vulnerabilities v 
-    WHERE v.os_platform ILIKE '%' || p_os_platform || '%';
+    RETURN QUERY SELECT v.id, v.agent_name, v.cve_id, v.severity, v.os_platform, v.status, v.first_seen
+    FROM wazuh_vulnerabilities v WHERE v.os_platform ILIKE '%' || p_os_platform || '%';
 END;
 $$ LANGUAGE plpgsql;
 
--- 3. PROCEDIMIENTO ALMACENADO GENERAL (Combina múltiples filtros dinámicamente)
--- Este procedimiento aprovecha los índices creados arriba.
+-- Filtro SOLO por Agente
+CREATE OR REPLACE FUNCTION sp_filter_by_agent(p_agent_name TEXT) 
+RETURNS TABLE(id INT, agent_name VARCHAR, cve_id TEXT, severity TEXT, os_platform TEXT, status VARCHAR, first_seen TIMESTAMP WITH TIME ZONE) AS $$
+BEGIN
+    RETURN QUERY SELECT v.id, v.agent_name, v.cve_id, v.severity, v.os_platform, v.status, v.first_seen
+    FROM wazuh_vulnerabilities v WHERE v.agent_name ILIKE '%' || p_agent_name || '%';
+END;
+$$ LANGUAGE plpgsql;
+
+-- 3. PROCEDIMIENTO ALMACENADO GENERAL (Conectado a la API y Frontend)
+-- Recibe arreglos (arrays) para soportar múltiples selecciones del frontend y devuelve la tabla completa.
 CREATE OR REPLACE FUNCTION sp_filter_vulnerabilities(
-    p_severity TEXT DEFAULT NULL,
-    p_os_platform TEXT DEFAULT NULL,
-    p_status TEXT DEFAULT NULL,
+    p_severities TEXT[] DEFAULT NULL,
+    p_os_platforms TEXT[] DEFAULT NULL,
+    p_statuses TEXT[] DEFAULT NULL,
+    p_agent_names TEXT[] DEFAULT NULL,
     p_days_ago INT DEFAULT NULL
 ) 
-RETURNS TABLE (
-    id INT,
-    agent_name VARCHAR,
-    cve_id TEXT,
-    severity TEXT,
-    os_platform TEXT,
-    status VARCHAR,
-    first_seen TIMESTAMP WITH TIME ZONE
-) AS $$
+RETURNS SETOF wazuh_vulnerabilities AS $$
 BEGIN
     RETURN QUERY 
-    SELECT 
-        v.id, 
-        v.agent_name, 
-        v.cve_id, 
-        v.severity, 
-        v.os_platform, 
-        v.status, 
-        v.first_seen
+    SELECT v.*
     FROM 
         wazuh_vulnerabilities v
     WHERE 
-        (p_severity IS NULL OR UPPER(v.severity) = UPPER(p_severity))
-        AND (p_os_platform IS NULL OR v.os_platform ILIKE '%' || p_os_platform || '%')
-        AND (p_status IS NULL OR UPPER(v.status) = UPPER(p_status))
+        (p_severities IS NULL OR array_length(p_severities, 1) IS NULL OR UPPER(v.severity) = ANY(SELECT UPPER(unnest) FROM unnest(p_severities)))
+        AND (p_os_platforms IS NULL OR array_length(p_os_platforms, 1) IS NULL OR EXISTS (SELECT 1 FROM unnest(p_os_platforms) p WHERE v.os_platform ILIKE '%' || p || '%'))
+        AND (p_statuses IS NULL OR array_length(p_statuses, 1) IS NULL OR UPPER(v.status) = ANY(SELECT UPPER(unnest) FROM unnest(p_statuses)))
+        AND (p_agent_names IS NULL OR array_length(p_agent_names, 1) IS NULL OR EXISTS (SELECT 1 FROM unnest(p_agent_names) a WHERE v.agent_name ILIKE '%' || a || '%'))
         AND (p_days_ago IS NULL OR v.first_seen >= CURRENT_DATE - (p_days_ago || ' days')::interval);
 END;
 $$ LANGUAGE plpgsql;
-
 
