@@ -2,6 +2,7 @@ from fastapi import APIRouter, Depends, Query, BackgroundTasks
 from sqlalchemy.orm import Session
 from sqlalchemy.sql import func, text
 from typing import Optional, List
+from datetime import datetime
 from ..db import get_db
 from ..models import User, WazuhConnection, WazuhVulnerability
 from ..services.authService import get_current_user
@@ -32,6 +33,9 @@ def list_vulns(
     os_platform: Optional[List[str]] = Query(None),
     score_min: Optional[float] = None,
     score_max: Optional[float] = None,
+    status: Optional[str] = Query(None),
+    detected_after: Optional[datetime] = Query(None),
+    detected_before: Optional[datetime] = Query(None),
     sort_key: Optional[str] = 'last_seen',
     sort_order: Optional[str] = 'desc',
     db: Session = Depends(get_db),
@@ -55,6 +59,13 @@ def list_vulns(
         query = query.filter(WazuhVulnerability.score_base >= score_min)
     if score_max is not None:
         query = query.filter(WazuhVulnerability.score_base <= score_max)
+
+    if status:
+        query = query.filter(func.upper(WazuhVulnerability.status) == status.upper())
+    if detected_after:
+        query = query.filter(WazuhVulnerability.first_seen >= detected_after)
+    if detected_before:
+        query = query.filter(WazuhVulnerability.first_seen <= detected_before)
 
     total_count = query.count()
 
