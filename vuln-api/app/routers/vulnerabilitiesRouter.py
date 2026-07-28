@@ -1,5 +1,5 @@
 from fastapi import APIRouter, Depends, Query, BackgroundTasks
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, selectinload
 from sqlalchemy.sql import func, text
 from typing import Optional, List
 from datetime import datetime
@@ -127,6 +127,14 @@ def list_vulns(
     if limit is not None:
         skip = (page - 1) * limit
         query = query.offset(skip).limit(limit)
+
+    # OPTIMIZACIÓN EXTREMA 2 (Eager Loading): Evitar problema N+1 Queries
+    # Le decimos a SQLAlchemy que traiga TODAS las conexiones y el historial en solo 2 consultas extra,
+    # en lugar de hacer 100 consultas separadas (una por cada vulnerabilidad).
+    query = query.options(
+        selectinload(WazuhVulnerability.connection),
+        selectinload(WazuhVulnerability.history)
+    )
 
     vulns = query.all()
 
