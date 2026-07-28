@@ -49,11 +49,6 @@ def list_vulns(
             now = datetime.now(detected_after.tzinfo)
         days_ago = max(0, (now - detected_after).days)
 
-    sp_query = text("""
-        SELECT id FROM sp_filter_vulnerabilities(
-            :sevs, :oses, :statuses, :agents, :days_ago
-        )
-    """)
     sp_params = {
         "sevs": severity,
         "oses": os_platform,
@@ -62,23 +57,35 @@ def list_vulns(
         "days_ago": days_ago
     }
     
+    sp_exists = False
     try:
-        sp_results = db.execute(sp_query, sp_params).fetchall()
-        valid_ids = [r[0] for r in sp_results]
-    except Exception as e:
-        # Fallback en caso de que el procedimiento no esté creado en la BD
-        # El rollback es VITAL en PostgreSQL, si no la transacción se bloquea.
+        # Usamos la sintaxis de casteo estricta para Postgres (TEXT[] y INT)
+        # Si estamos en SQLite (los tests), esto fallará inmediatamente y usará el fallback.
+        db.execute(text("SELECT 1 FROM sp_filter_vulnerabilities(NULL::TEXT[], NULL::TEXT[], NULL::TEXT[], NULL::TEXT[], NULL::INT) LIMIT 0"))
+        sp_exists = True
+    except Exception:
         db.rollback()
-        valid_ids = None
+        sp_exists = False
 
     query = db.query(WazuhVulnerability)
     
-    # Si el SP se ejecutó exitosamente, usamos los IDs que filtró
-    if valid_ids is not None:
-        if not valid_ids:
-            query = query.filter(WazuhVulnerability.id == -1) # Forzar vacío
-        else:
-            query = query.filter(WazuhVulnerability.id.in_(valid_ids))
+    if sp_exists:
+        # OPTIMIZACIÓN EXTREMA: En lugar de traer 500,000 IDs a Python y colapsar la RAM,
+        # inyectamos el procedimiento almacenado como una subconsulta (SubQuery) nativa.
+        # PostgreSQL resolverá todo internamente en milisegundos.
+        query = query.filter(text("""
+            wazuh_vulnerabilities.id IN (
+                SELECT id FROM sp_filter_vulnerabilities(
+                    :sevs, :oses, :statuses, :agents, :days_ago
+                )
+            )
+        """).bindparams(
+            sevs=severity,
+            oses=os_platform,
+            statuses=[status] if status else None,
+            agents=agent_name,
+            days_ago=days_ago
+        ))
     else:
         # Lógica original (Fallback)
         if agent_name:
