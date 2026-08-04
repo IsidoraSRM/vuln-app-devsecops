@@ -32,6 +32,7 @@ def setup_timescaledb():
     db = SessionLocal()
     try:
         log.info("initializing_timescaledb_features")
+        db.execute(text("CREATE EXTENSION IF NOT EXISTS timescaledb CASCADE;"))
         db.execute(text("SELECT create_hypertable('user_interactions', 'timestamp', if_not_exists => TRUE);"))
         db.execute(text("SELECT create_hypertable('vulnerability_history', 'timestamp', if_not_exists => TRUE);"))
         db.execute(text("""
@@ -106,10 +107,20 @@ def setup_db_optimizations():
             END;
             $$ LANGUAGE plpgsql;
         """))
+        
+        # Cargar y ejecutar procedimientos almacenados adicionales
+        import os
+        sql_path = os.path.join(os.path.dirname(__file__), "db-scripts", "30-stored-procedures.sql")
+        if os.path.exists(sql_path):
+            log.info("applying_stored_procedures")
+            with open(sql_path, "r", encoding="utf-8") as f:
+                sql_content = f.read()
+                db.execute(text(sql_content))
+                
         db.commit()
-        log.info("materialized_views_setup_complete")
+        log.info("materialized_views_and_procedures_setup_complete")
     except Exception as e:
-        log.warning(f"No se pudieron crear las vistas materializadas o la función de refresco: {e}")
+        log.warning(f"No se pudieron crear las vistas materializadas o los procedimientos almacenados: {e}")
         db.rollback()
     finally:
         db.close()

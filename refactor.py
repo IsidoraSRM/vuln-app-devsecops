@@ -668,6 +668,7 @@ def setup_timescaledb():
     db = SessionLocal()
     try:
         log.info("initializing_timescaledb_features")
+        db.execute(text("CREATE EXTENSION IF NOT EXISTS timescaledb CASCADE;"))
         db.execute(text("SELECT create_hypertable('user_interactions', 'timestamp', if_not_exists => TRUE);"))
         db.execute(text("SELECT create_hypertable('vulnerability_history', 'timestamp', if_not_exists => TRUE);"))
         db.execute(text(\"\"\"
