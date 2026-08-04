@@ -27,7 +27,11 @@ class User(Base):
     is_active = Column(Boolean, default=False) 
     is_default_password = Column(Boolean, nullable=False, default=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
+    role = Column(String, default="superadmin")
+    assigned_connection_id = Column(Integer, ForeignKey("wazuh_connections.id", ondelete="SET NULL"), nullable=True)
+    
     interactions = relationship("UserInteraction", back_populates="user")
+    assigned_connection = relationship("WazuhConnection")
 
 
 class WazuhConnection(Base):

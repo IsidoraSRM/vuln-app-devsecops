@@ -14,7 +14,13 @@ CONNECTION_NOT_FOUND = "Conexión no encontrada"
 
 @router.get("")
 def list_connections(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
-    conns = db.query(WazuhConnection).all()
+    if current_user.role == "superadmin":
+        conns = db.query(WazuhConnection).all()
+    else:
+        if current_user.assigned_connection_id:
+            conns = db.query(WazuhConnection).filter(WazuhConnection.id == current_user.assigned_connection_id).all()
+        else:
+            conns = []
     return [
         {
             "id": c.id,
@@ -36,6 +42,9 @@ def create_connection(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
+    if current_user.role != "superadmin":
+        raise HTTPException(status_code=403, detail="No tienes permisos para realizar esta acción")
+
     if db.query(WazuhConnection).filter(WazuhConnection.name == request.name).first():
         raise HTTPException(status_code=400, detail="Ya existe una conexión con ese nombre")
 
@@ -71,6 +80,9 @@ def update_connection(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
+    if current_user.role != "superadmin":
+        raise HTTPException(status_code=403, detail="No tienes permisos para realizar esta acción")
+
     conn = db.query(WazuhConnection).filter(WazuhConnection.id == conn_id).first()
     if not conn:
         raise HTTPException(status_code=404, detail=CONNECTION_NOT_FOUND)
@@ -90,6 +102,9 @@ def delete_connection(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
+    if current_user.role != "superadmin":
+        raise HTTPException(status_code=403, detail="No tienes permisos para realizar esta acción")
+
     conn = db.query(WazuhConnection).filter(WazuhConnection.id == conn_id).first()
     if not conn:
         raise HTTPException(status_code=404, detail=CONNECTION_NOT_FOUND)
@@ -103,6 +118,9 @@ def test_wazuh_connection_endpoint(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
+    if current_user.role != "superadmin":
+        raise HTTPException(status_code=403, detail="No tienes permisos para realizar esta acción")
+
     conn = db.query(WazuhConnection).filter(WazuhConnection.id == conn_id).first()
     if not conn:
         raise HTTPException(status_code=404, detail=CONNECTION_NOT_FOUND)
@@ -124,6 +142,10 @@ def sync_connection(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
+    if current_user.role != "superadmin":
+        if conn_id != current_user.assigned_connection_id:
+            raise HTTPException(status_code=403, detail="No tienes acceso a esta conexión")
+
     conn = db.query(WazuhConnection).filter(WazuhConnection.id == conn_id).first()
     if not conn:
         raise HTTPException(status_code=404, detail=CONNECTION_NOT_FOUND)

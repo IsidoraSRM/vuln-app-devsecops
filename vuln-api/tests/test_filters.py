@@ -1,13 +1,28 @@
 from sqlalchemy import text
-
 from app.db import DATABASE_URL
-from app.models import WazuhConnection, WazuhVulnerability
+from app.models import WazuhConnection, WazuhVulnerability, User
 from app.crypto import encrypt
+from app.services.authService import hash_password
 
 IS_SQLITE = DATABASE_URL.startswith("sqlite") if DATABASE_URL else True
 
 # helpers
 
+def _create_user(db, username="admin", password="admin"):
+    user = User(
+        username=username, 
+        password_hash=hash_password(password), 
+        is_active=True,
+        role="superadmin"
+    )
+    db.add(user)
+    db.commit()
+    db.refresh(user)
+    return user
+
+def _get_headers(client, username="admin", password="admin"):
+    res = client.post("/auth/login", data={"username": username, "password": password})
+    return {"Authorization": f"Bearer {res.json()['access_token']}"}
 
 def _refresh_views(db):
     """En PostgreSQL las vistas materializadas quedan desactualizadas tras insertar
@@ -18,7 +33,6 @@ def _refresh_views(db):
         db.commit()
     except Exception:
         db.rollback()
-
 
 def _create_connection(db, name="test-conn"):
     conn = WazuhConnection(
@@ -32,7 +46,6 @@ def _create_connection(db, name="test-conn"):
     db.commit()
     db.refresh(conn)
     return conn
-
 
 def _create_vuln(db, conn_id, cve, agent="host-1", severity="High",
                  os_platform="ubuntu", os_version="22.04"):
@@ -52,11 +65,12 @@ def _create_vuln(db, conn_id, cve, agent="host-1", severity="High",
     db.commit()
     return vuln
 
-
 # tests
 
-
 def test_filters_json_structure(client, db_session):
+    _create_user(db_session)
+    headers = _get_headers(client)
+    
     conn = _create_connection(db_session)
     _create_vuln(db_session, conn.id, "CVE-2026-0001", agent="host-ubuntu",
                  severity="High", os_platform="ubuntu", os_version="22.04")
@@ -64,7 +78,7 @@ def test_filters_json_structure(client, db_session):
                  severity="Critical", os_platform="windows", os_version="10")
     _refresh_views(db_session)
 
-    res = client.get("/vulns/filters")
+    res = client.get("/vulns/filters", headers=headers)
     assert res.status_code == 200
     body = res.json()
     assert sorted(body.keys()) == ["agents", "cves", "os", "packages", "severities"]
@@ -72,28 +86,33 @@ def test_filters_json_structure(client, db_session):
     assert {"platform": "ubuntu", "version": "22.04"} in body["os"]
     assert {"platform": "windows", "version": "10"} in body["os"]
 
-
 def test_filters_by_connection(client, db_session):
+    _create_user(db_session)
+    headers = _get_headers(client)
+    
     conn_a = _create_connection(db_session, name="conn-a")
     conn_b = _create_connection(db_session, name="conn-b")
     _create_vuln(db_session, conn_a.id, "CVE-2026-0003", agent="host-a")
     _create_vuln(db_session, conn_b.id, "CVE-2026-0004", agent="host-b")
     _refresh_views(db_session)
 
-    res = client.get(f"/vulns/filters?connection_id={conn_a.id}")
+    res = client.get(f"/vulns/filters?connection_id={conn_a.id}", headers=headers)
     assert res.status_code == 200
     assert res.json()["agents"] == ["host-a"]
 
-
-def test_filters_rejects_sql_injection_in_connection_id(client):
-    res = client.get("/vulns/filters?connection_id=1 OR 1=1")
+def test_filters_rejects_sql_injection_in_connection_id(client, db_session):
+    _create_user(db_session)
+    headers = _get_headers(client)
+    res = client.get("/vulns/filters?connection_id=1 OR 1=1", headers=headers)
     assert res.status_code == 422
-
 
 def test_filters_fallback_rolls_back_failed_transaction(client, db_session, monkeypatch):
     """El plan A (vistas materializadas) falla en SQLite; el fallback debe hacer
     rollback antes de consultar directo, o en PostgreSQL la transacción queda
     abortada y el endpoint devolvería 500."""
+    _create_user(db_session)
+    headers = _get_headers(client)
+    
     conn = _create_connection(db_session)
     _create_vuln(db_session, conn.id, "CVE-2026-0005")
 
@@ -111,7 +130,7 @@ def test_filters_fallback_rolls_back_failed_transaction(client, db_session, monk
 
     monkeypatch.setattr(db_session, "rollback", spy_rollback)
 
-    res = client.get("/vulns/filters")
+    res = client.get("/vulns/filters", headers=headers)
     assert res.status_code == 200
     assert res.json()["agents"] == ["host-1"]
     assert rollback_calls, "el fallback debe ejecutar db.rollback() tras el fallo del plan A"

@@ -98,6 +98,7 @@ jobs:
   sonar-scan:
     name: SonarQube SAST Analysis
     runs-on: ubuntu-latest
+    if: false # DESACTIVADO TEMPORALMENTE (MIGRACIÓN DE NUBE)
     needs: [backend-tests, frontend-tests]
     permissions:
       contents: read

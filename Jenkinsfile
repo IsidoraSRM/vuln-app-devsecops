@@ -82,6 +82,9 @@ pipeline {
         }
 
         stage('SAST: SonarQube Code Analysis') {
+            when {
+                expression { false } // DESACTIVADO TEMPORALMENTE (MIGRACIÓN DE NUBE)
+            }
             steps {
                 withSonarQubeEnv('SonarQube') {
                     sh '''
@@ -100,6 +103,9 @@ pipeline {
         }
 
         stage('GATE: SonarQube Quality Gate') {
+            when {
+                expression { false } // DESACTIVADO TEMPORALMENTE (MIGRACIÓN DE NUBE)
+            }
             steps {
                 timeout(time: 1, unit: 'MINUTES') {
                     waitForQualityGate abortPipeline: true, credentialsId: 'sonar-token'

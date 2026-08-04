@@ -8,6 +8,7 @@ import ChangePassword from '../views/ChangePassword.vue'
 import Logs from '../views/Logs.vue'
 import Metrics from '../views/Metrics.vue'
 import NotFound from '../views/NotFound.vue'
+import Cargas from '../views/Cargas.vue'
 import userService from '../../application/services/userService'
 
 
@@ -15,6 +16,7 @@ const routes = [
   { path: '/login', name: 'Login', component: Login },
   { path: '/', redirect: '/login' },
   { path: '/dashboard', name: 'Dashboard', component: Dashboard, meta: { requiresAuth: true } },
+  { path: '/cargas', name: 'Cargas', component: Cargas, meta: { requiresAuth: true } },
   { path: '/timeline', name: 'Timeline', component: Timeline, meta: { requiresAuth: true } },
   { path: '/config-user', name: 'ConfigUser', component: ConfigUser, meta: { requiresAuth: true } },
   { path: '/config-wazuh', name: 'ConfigWazuh', component: ConfigWazuh, meta: { requiresAuth: true } },
@@ -51,6 +53,9 @@ router.beforeEach(async (to, from) => {
       const userMeRes = await userService.getUserMe()
       const user = userMeRes.data
 
+      localStorage.setItem('role', user.role || 'operator')
+      localStorage.setItem('assigned_connection_id', user.assigned_connection_id || '')
+
       // Si sigue con contraseña por defecto, solo puede entrar a change-password
       if (user.is_default_password && to.path !== '/change-password') {
         sessionStorage.setItem(
@@ -60,11 +65,19 @@ router.beforeEach(async (to, from) => {
         return '/change-password'
       }
 
+      // Restricción de rol Super Admin
+      const isSuperAdminOnly = ['ConfigUser', 'ConfigWazuh'].includes(to.name)
+      if (isSuperAdminOnly && user.role !== 'superadmin') {
+        return '/dashboard'
+      }
+
       return true
     } catch (error) {
       // Si falla getUserMe, token inválido/expirado o backend no responde
       localStorage.removeItem('token')
       localStorage.removeItem('username')
+      localStorage.removeItem('role')
+      localStorage.removeItem('assigned_connection_id')
       return '/login'
     }
   }

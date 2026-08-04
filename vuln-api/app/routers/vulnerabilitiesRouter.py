@@ -102,8 +102,13 @@ def list_vulns(
             query = query.filter(WazuhVulnerability.first_seen <= detected_before)
 
     # Filtros adicionales que no están en el SP general
-    if connection_id:
-        query = query.filter(WazuhVulnerability.connection_id == connection_id)
+    if current_user.role != "superadmin":
+        assigned_id = current_user.assigned_connection_id or -1
+        query = query.filter(WazuhVulnerability.connection_id == assigned_id)
+    else:
+        if connection_id:
+            query = query.filter(WazuhVulnerability.connection_id == connection_id)
+
     if cve_id:
         query = query.filter(WazuhVulnerability.cve_id.in_(cve_id))
     if package_name:
@@ -129,8 +134,6 @@ def list_vulns(
         query = query.offset(skip).limit(limit)
 
     # OPTIMIZACIÓN EXTREMA 2 (Eager Loading): Evitar problema N+1 Queries
-    # Le decimos a SQLAlchemy que traiga TODAS las conexiones y el historial en solo 2 consultas extra,
-    # en lugar de hacer 100 consultas separadas (una por cada vulnerabilidad).
     query = query.options(
         selectinload(WazuhVulnerability.connection),
         selectinload(WazuhVulnerability.history)
@@ -138,8 +141,75 @@ def list_vulns(
 
     vulns = query.all()
 
-    items = [
-        {
+    def parse_dt(val):
+        if val is None:
+            return None
+        if isinstance(val, str):
+            try:
+                return datetime.fromisoformat(val.replace(" ", "T"))
+            except Exception:
+                return None
+        return val
+
+    # Get unique connection IDs in the page's vulns
+    conn_ids = set(v.connection_id for v in vulns)
+    connection_syncs = {}
+    for cid in conn_ids:
+        # Get the unique timestamps of the history events for vulnerabilities in this connection
+        # This represents the historical sync runs (cargas)
+        # Limit to the last 5 loads, sorted chronologically ASC
+        timestamps_res = db.execute(text("""
+            SELECT DISTINCT timestamp FROM vulnerability_history vh
+            JOIN wazuh_vulnerabilities wv ON vh.vulnerability_id = wv.id
+            WHERE wv.connection_id = :conn_id
+            ORDER BY timestamp DESC
+            LIMIT 5
+        """), {"conn_id": cid}).fetchall()
+        parsed_ts = []
+        for r in timestamps_res:
+            dt = parse_dt(r[0])
+            if dt:
+                parsed_ts.append(dt)
+        connection_syncs[cid] = sorted(parsed_ts)
+
+    items = []
+    for v in vulns:
+        # Map history list
+        hist_list = [
+            {
+                "id": h.id,
+                "action": h.action,
+                "details": h.details,
+                "timestamp": h.timestamp,
+            }
+            for h in sorted(v.history, key=lambda h: h.timestamp)
+        ]
+        
+        # Calculate cargas status
+        sync_ts = connection_syncs.get(v.connection_id, [])
+        cargas = []
+        for i, t in enumerate(sync_ts):
+            past_events = []
+            for h in hist_list:
+                h_ts = parse_dt(h["timestamp"])
+                if h_ts and h_ts <= t:
+                    past_events.append(h)
+
+            if not past_events:
+                status = "white"
+            else:
+                last_event = past_events[-1]
+                if last_event["action"] in ("DETECTED", "REOPENED"):
+                    status = "red"
+                else:
+                    status = "white"
+            cargas.append({
+                "label": f"Carga {i+1}",
+                "timestamp": t.isoformat(),
+                "status": status
+            })
+
+        items.append({
             "id": v.id,
             "connection_id": v.connection_id,
             "connection_name": v.connection.name if v.connection else None,
@@ -164,18 +234,9 @@ def list_vulns(
             "scanner_vendor": v.scanner_vendor,
             "first_seen": v.first_seen,
             "last_seen": v.last_seen,
-            "history": [
-                {
-                    "id": h.id,
-                    "action": h.action,
-                    "details": h.details,
-                    "timestamp": h.timestamp,
-                }
-                for h in sorted(v.history, key=lambda h: h.timestamp)
-            ],
-        }
-        for v in vulns
-    ]
+            "history": hist_list,
+            "cargas": cargas
+        })
 
     return {
         "total": total_count,
@@ -185,15 +246,28 @@ def list_vulns(
     }
 
 @router.get("/filters")
-def get_unique_filters(connection_id: Optional[int] = None, db: Session = Depends(get_db)):
+def get_unique_filters(
+    connection_id: Optional[int] = None,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    if current_user.role != "superadmin":
+        connection_id = current_user.assigned_connection_id or -1
+
     """Obtiene los valores únicos de filtros desde las vistas materializadas precalculadas."""
     try:
-        if connection_id:
+        if connection_id is not None and connection_id != -1:
             agents_res = db.execute(text("SELECT agent_name FROM mv_unique_agents WHERE connection_id = :conn_id"), {"conn_id": connection_id}).fetchall()
             cves_res = db.execute(text("SELECT cve_id FROM mv_unique_cves WHERE connection_id = :conn_id"), {"conn_id": connection_id}).fetchall()
             packages_res = db.execute(text("SELECT package_name FROM mv_unique_packages WHERE connection_id = :conn_id"), {"conn_id": connection_id}).fetchall()
             severities_res = db.execute(text("SELECT severity FROM mv_unique_severities WHERE connection_id = :conn_id"), {"conn_id": connection_id}).fetchall()
             os_res = db.execute(text("SELECT os_platform, os_version FROM mv_unique_os WHERE connection_id = :conn_id"), {"conn_id": connection_id}).fetchall()
+        elif connection_id == -1:
+            agents_res = []
+            cves_res = []
+            packages_res = []
+            severities_res = []
+            os_res = []
         else:
             agents_res = db.execute(text("SELECT DISTINCT agent_name FROM mv_unique_agents")).fetchall()
             cves_res = db.execute(text("SELECT DISTINCT cve_id FROM mv_unique_cves")).fetchall()
@@ -209,11 +283,9 @@ def get_unique_filters(connection_id: Optional[int] = None, db: Session = Depend
 
     except Exception:
         # Fallback para desarrollo local con SQLite sin vistas materializadas.
-        # El rollback es obligatorio: en PostgreSQL la transacción queda abortada
-        # tras el fallo del try y sin él las consultas del fallback también fallan.
         db.rollback()
         query = db.query(WazuhVulnerability)
-        if connection_id:
+        if connection_id is not None:
             query = query.filter(WazuhVulnerability.connection_id == connection_id)
         
         agents = [r[0] for r in query.with_entities(WazuhVulnerability.agent_name).distinct().all() if r[0]]
@@ -223,7 +295,7 @@ def get_unique_filters(connection_id: Optional[int] = None, db: Session = Depend
         os_query_res = query.with_entities(WazuhVulnerability.os_platform, WazuhVulnerability.os_version).distinct().all()
         os_list = [{"platform": r[0], "version": r[1]} for r in os_query_res if r[0]]
 
-    # Deduplicar os_list (por si acaso hay nulos iterados)
+    # Deduplicar os_list
     unique_os = []
     seen = set()
     for os_item in os_list:
@@ -238,5 +310,57 @@ def get_unique_filters(connection_id: Optional[int] = None, db: Session = Depend
         "packages": sorted(packages),
         "severities": sorted(severities),
         "os": unique_os
+    }
+
+@router.get("/metrics/summary")
+def get_metrics_summary(
+    connection_id: Optional[int] = None,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    if current_user.role != "superadmin":
+        connection_id = current_user.assigned_connection_id or -1
+
+    query = db.query(WazuhVulnerability).filter(WazuhVulnerability.status == "ACTIVE")
+    if connection_id is not None:
+        query = query.filter(WazuhVulnerability.connection_id == connection_id)
+
+    # Group by severity and count distinct CVE IDs
+    severity_query = db.query(
+        WazuhVulnerability.severity,
+        func.count(WazuhVulnerability.cve_id.distinct())
+    ).filter(WazuhVulnerability.status == "ACTIVE")
+    
+    if connection_id is not None:
+        severity_query = severity_query.filter(WazuhVulnerability.connection_id == connection_id)
+        
+    severity_counts = severity_query.group_by(WazuhVulnerability.severity).all()
+
+    counts_dict = {
+        "CRITICAL": 0,
+        "HIGH": 0,
+        "MEDIUM": 0,
+        "LOW": 0,
+        "UNKNOWN": 0
+    }
+    for sev, count in severity_counts:
+        sev_key = (sev or "UNKNOWN").upper()
+        if sev_key in counts_dict:
+            counts_dict[sev_key] += count
+        else:
+            counts_dict["UNKNOWN"] += count
+
+    # Count overall unique CVEs
+    total_query = db.query(func.count(WazuhVulnerability.cve_id.distinct())).filter(WazuhVulnerability.status == "ACTIVE")
+    if connection_id is not None:
+        total_query = total_query.filter(WazuhVulnerability.connection_id == connection_id)
+    total = total_query.scalar() or 0
+
+    return {
+        "total": total,
+        "critical": counts_dict["CRITICAL"],
+        "high": counts_dict["HIGH"],
+        "medium": counts_dict["MEDIUM"],
+        "low": counts_dict["LOW"] + counts_dict["UNKNOWN"]
     }
 

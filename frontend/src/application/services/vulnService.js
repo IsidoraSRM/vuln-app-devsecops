@@ -61,6 +61,14 @@ export default {
         return apiClient.get('/vulns/filters', { params })
     },
 
+    getMetricsSummary: async (connectionId = null) => {
+        const params = {}
+        if (connectionId !== null && connectionId !== undefined && connectionId !== '') {
+            params.connection_id = connectionId
+        }
+        return apiClient.get('/vulns/metrics/summary', { params })
+    },
+
     syncVulns: async () => {
         return apiClient.post('/vulns/sync-all')
     },

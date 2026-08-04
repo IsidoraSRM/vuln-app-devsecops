@@ -127,6 +127,24 @@ def setup_db_optimizations():
 
 setup_db_optimizations()
 
+def run_database_migrations():
+    from .models import IS_SQLITE
+    if not IS_SQLITE:
+        db = SessionLocal()
+        try:
+            log.info("running_database_migrations_for_roles")
+            db.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS role VARCHAR DEFAULT 'superadmin';"))
+            db.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS assigned_connection_id INTEGER REFERENCES wazuh_connections(id) ON DELETE SET NULL;"))
+            db.commit()
+            log.info("database_migrations_completed")
+        except Exception as e:
+            log.warning(f"Error during user roles database migration: {e}")
+            db.rollback()
+        finally:
+            db.close()
+
+run_database_migrations()
+
 def create_default_admin():
     db = SessionLocal()
     try:
@@ -138,9 +156,15 @@ def create_default_admin():
                 password_hash=hash_password("admin"), 
                 is_active=True,
                 is_default_password=True,
+                role="superadmin"
             )
             db.add(default_admin)
             db.commit()
+        else:
+            if admin_exists.role != "superadmin":
+                log.info("updating_existing_admin_role_to_superadmin")
+                admin_exists.role = "superadmin"
+                db.commit()
     finally:
         db.close()
 

@@ -13,6 +13,10 @@ const userService = {
     return apiClient.delete(`/users/${userId}`)
   },
 
+  updateUser: async (userId, userData) => {
+    return apiClient.put(`/users/${userId}`, userData)
+  },
+
   getUserMe: async () => {
     return apiClient.get('/users/me')
   }
