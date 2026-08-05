@@ -83,7 +83,7 @@ pipeline {
 
         stage('SAST: SonarQube Code Analysis') {
             when {
-                expression { false } // DESACTIVADO TEMPORALMENTE (MIGRACIÓN DE NUBE)
+                expression { true } // Reactivado tras la migración a GCP
             }
             steps {
                 withSonarQubeEnv('SonarQube') {
@@ -104,7 +104,7 @@ pipeline {
 
         stage('GATE: SonarQube Quality Gate') {
             when {
-                expression { false } // DESACTIVADO TEMPORALMENTE (MIGRACIÓN DE NUBE)
+                expression { true } // Reactivado tras la migración a GCP
             }
             steps {
                 timeout(time: 1, unit: 'MINUTES') {
@@ -275,7 +275,7 @@ with open("docker-compose.dast.yml", "w") as f:
             echo 'Pipeline UNSTABLE — algunas stages tuvieron warnings (tests, ZAP).'
         }
         failure {
-            echo 'Pipeline FAILED — revisa SonarQube en http://18.218.47.7:9000/dashboard?id=vuln-app'
+            echo 'Pipeline FAILED — revisa SonarQube en http://34.176.219.12:9000/dashboard?id=vuln-app'
         }
     }
 }
