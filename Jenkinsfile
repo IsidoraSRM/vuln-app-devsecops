@@ -149,6 +149,12 @@ pipeline {
                         if [ ! -f .env ]; then
                             cp .env.example .env
                         fi
+
+                        # 1b. Generar una ENCRYPTION_KEY efimera y valida (Fernet) para este build.
+                        # crypto.py exige una llave Fernet valida al arrancar; el .env.example solo trae
+                        # un placeholder. Se regenera en cada corrida (es un entorno de prueba desechable).
+                        ENC=$(python3 -c "import base64, os; print(base64.urlsafe_b64encode(os.urandom(32)).decode())")
+                        sed -i "s|^ENCRYPTION_KEY=.*|ENCRYPTION_KEY=$ENC|" .env
                         
                         # 2. Modificar el archivo docker-compose dinámicamente usando Python
                         # Esto elimina 'container_name' y 'ports' para evitar conflictos de nombres y puertos con los contenedores permanentes del host.
@@ -226,6 +232,10 @@ with open("docker-compose.dast.yml", "w") as f:
                     if [ ! -f .env ]; then
                         cp .env.example .env
                     fi
+
+                    # 1b. Generar una ENCRYPTION_KEY efimera y valida (Fernet) para este build.
+                    ENC=$(python3 -c "import base64, os; print(base64.urlsafe_b64encode(os.urandom(32)).decode())")
+                    sed -i "s|^ENCRYPTION_KEY=.*|ENCRYPTION_KEY=$ENC|" .env
 
                     # 2. Asegurar que la carpeta y certificados SSL existan para Nginx (usando Docker para evitar problemas de permisos del host)
                     if [ ! -f ./nginx/ssl/nginx-selfsigned.crt ]; then
