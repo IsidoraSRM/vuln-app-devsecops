@@ -89,6 +89,7 @@ pipeline {
                 withSonarQubeEnv('SonarQube') {
                     sh '''
                         docker run --rm \
+                            -u 0 \
                             --network=sonarqube_default \
                             -v "$WORKSPACE:/usr/src" \
                             -w /usr/src \
@@ -96,7 +97,8 @@ pipeline {
                             -e SONAR_TOKEN="$SONAR_AUTH_TOKEN" \
                             sonarsource/sonar-scanner-cli:latest \
                             -Dproject.settings=dev-tools/sonarqube/sonar-project.properties \
-                            -Dsonar.projectBaseDir=.
+                            -Dsonar.projectBaseDir=. \
+                            -Dsonar.working.directory=/usr/src/.scannerwork
                     '''
                 }
             }
