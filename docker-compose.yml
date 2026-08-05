@@ -1,17 +1,12 @@
+# Compose para DESARROLLO LOCAL y el PIPELINE (CI/CD): levanta los 3 servicios
+# juntos en una sola red. Para PRODUCCION multi-host (BD y app en hosts distintos
+# con TLS) usar los archivos de prod_config/ (docker-compose.db.yml + app-only.yml).
 services:
   db-api:
     image: timescale/timescaledb:latest-pg15
     container_name: db-api
     restart: unless-stopped
-    user: postgres
-    # Copiamos la llave privada a /tmp para evitar problemas de permisos de montajes Windows/Linux (chmod 600)
-    # y luego ejecutamos postgres con SSL habilitado.
-    command: >
-      sh -c "
-      cp /ssl/server.key /tmp/server.key &&
-      chmod 600 /tmp/server.key &&
-      exec postgres -c shared_preload_libraries=timescaledb -c ssl=on -c ssl_cert_file=/ssl/server.crt -c ssl_key_file=/tmp/server.key -c ssl_ca_file=/ssl/ca.crt
-      "
+    command: postgres -c shared_preload_libraries=timescaledb
     env_file:
       - .env
     ports:
@@ -19,18 +14,60 @@ services:
     volumes:
       - postgres_api_data:/var/lib/postgresql/data
       - ./db-init:/docker-entrypoint-initdb.d:ro
-      - ./db-ssl:/ssl:ro
     networks:
-      - db-network
+      - app-network
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
       interval: 5s
       timeout: 5s
       retries: 5
 
+  api:
+    build: ./vuln-api
+    container_name: api
+    ports:
+      - "8000:8000"
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db-api:5432/${POSTGRES_DB}
+      ENCRYPTION_KEY: ${ENCRYPTION_KEY}
+      SECRET_KEY: ${SECRET_KEY}
+    depends_on:
+      db-api:
+        condition: service_healthy
+    networks:
+      - app-network
+    restart: unless-stopped
+    env_file:
+      - .env
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/docs"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  frontend:
+    build:
+      context: ./frontend
+      args:
+        - VITE_API_URL=${VITE_API_URL}
+    container_name: frontend
+    env_file:
+      - .env
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx/ssl:/etc/nginx/ssl:ro
+    depends_on:
+      api:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - app-network
+
 volumes:
   postgres_api_data:
 
 networks:
-  db-network:
+  app-network:
     driver: bridge

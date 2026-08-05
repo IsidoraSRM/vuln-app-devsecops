@@ -16,3 +16,10 @@ certbot/*
 # nunca deben versionarse. Una llave privada en git es una fuga de credenciales.
 nginx/ssl/*.key
 nginx/ssl/*.crt
+
+# Certificados TLS de la base de datos (mismo motivo: NO versionar llaves privadas).
+# Se generan con generate-db-ssl.sh en el host de la BD antes de desplegar.
+db-ssl/*.key
+db-ssl/*.crt
+db-ssl/*.csr
+db-ssl/*.srl
