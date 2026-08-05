@@ -94,7 +94,7 @@ pipeline {
                             -w /usr/src \
                             -e SONAR_HOST_URL="$SONAR_HOST_URL" \
                             -e SONAR_TOKEN="$SONAR_AUTH_TOKEN" \
-                            sonarsource/sonar-scanner-cli:5 \
+                            sonarsource/sonar-scanner-cli:latest \
                             -Dproject.settings=dev-tools/sonarqube/sonar-project.properties \
                             -Dsonar.projectBaseDir=.
                     '''
