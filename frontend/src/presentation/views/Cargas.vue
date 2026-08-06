@@ -60,23 +60,17 @@
     </div>
 
     <div v-if="!loading" class="filter-toggle-bar">
-      <button class="btn-filter-toggle" @click="showFilters = !showFilters">
-        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-          <polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"></polygon>
-        </svg>
-        <span>{{ showFilters ? 'Ocultar filtros' : 'Filtros avanzados' }}</span>
-      </button>
-      <button v-if="showFilters" class="btn-clear-filters" @click="clearFilters">
+      <button class="btn-clear-filters" @click="clearFilters">
         <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
           <path d="M3 6h18"></path>
           <path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"></path>
           <path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"></path>
         </svg>
-        <span>Limpiar</span>
+        <span>Limpiar filtros</span>
       </button>
     </div>
 
-    <div v-show="showFilters" class="card filter-panel">
+    <div class="card filter-panel">
       <div class="filter-row">
         <div v-if="role === 'superadmin'" class="f-group">
           <label>Conexión Wazuh</label>
@@ -225,7 +219,7 @@
           </caption>
           <thead>
             <tr>
-              <th style="width: 25%;" @click="sortBy('severity')">
+              <th style="width: 15%;" @click="sortBy('severity')">
                 Severidad
                 <span v-if="sortKey === 'severity'" class="sort-indicator">
                   <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="4" :class="sortOrder === 'asc' ? '' : 'rotate-180'">
@@ -233,7 +227,7 @@
                   </svg>
                 </span>
               </th>
-              <th class="col-cve" style="width: 45%;" @click="sortBy('cve_id')">
+              <th class="col-cve" style="width: 25%;" @click="sortBy('cve_id')">
                 CVE ID
                 <span v-if="sortKey === 'cve_id'" class="sort-indicator">
                   <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="4" :class="sortOrder === 'asc' ? '' : 'rotate-180'">
@@ -241,7 +235,12 @@
                   </svg>
                 </span>
               </th>
-              <th style="width: 30%;">Evolución por Carga</th>
+              <template v-if="cargasHeaders.length > 0">
+                <th v-for="header in cargasHeaders" :key="header.index" style="text-align: center;">
+                  {{ header.label }} ({{ header.date }})
+                </th>
+              </template>
+              <th v-else style="width: 60%;">Evolución por Carga</th>
             </tr>
           </thead>
           <tbody>
@@ -252,16 +251,20 @@
                 </span>
               </td>
               <td class="font-medium text-black">{{ vuln.cve_id || 'N/A' }}</td>
-              <td>
-                <div class="cargas-evolution">
-                  <div 
-                    v-for="(carga, idx) in vuln.cargas" 
-                    :key="idx" 
-                    :class="['carga-box', carga.status]"
-                    :title="`${carga.label}: ${carga.status === 'red' ? 'Presente (Activa)' : 'Ausente (Remediada)'} (${formatDate(carga.timestamp)})`"
-                  ></div>
-                  <span v-if="!vuln.cargas || vuln.cargas.length === 0" class="no-cargas-text">N/D</span>
-                </div>
+              <template v-if="cargasHeaders.length > 0">
+                <td v-for="header in cargasHeaders" :key="header.index" style="text-align: center;">
+                  <div class="cargas-evolution-cell">
+                    <div 
+                      v-if="vuln.cargas[header.index]" 
+                      :class="['carga-box', vuln.cargas[header.index].status]"
+                      :title="`${vuln.cargas[header.index].label}: ${vuln.cargas[header.index].status === 'red' ? 'Presente (Activa)' : 'Ausente (Remediada)'} (${formatDate(vuln.cargas[header.index].timestamp)})`"
+                    ></div>
+                    <span v-else class="no-cargas-text">-</span>
+                  </div>
+                </td>
+              </template>
+              <td v-else>
+                <span class="no-cargas-text">N/D</span>
               </td>
             </tr>
           </tbody>
@@ -320,7 +323,32 @@ const syncing = ref(false)
 const error = ref('')
 const sortKey = ref('last_seen')
 const sortOrder = ref('desc')
-const showFilters = ref(false)
+const showFilters = ref(true)
+
+const formatShortDate = (dateString) => {
+  if (!dateString) return 'N/D'
+  const d = new Date(dateString)
+  if (isNaN(d.getTime())) return 'N/D'
+  const day = String(d.getDate()).padStart(2, '0')
+  const month = String(d.getMonth() + 1).padStart(2, '0')
+  const year = String(d.getFullYear()).slice(-2)
+  return `${day}-${month}-${year}`
+}
+
+const cargasHeaders = computed(() => {
+  if (vulns.value.length === 0) return []
+  let maxCargas = []
+  for (const vuln of vulns.value) {
+    if (vuln.cargas && vuln.cargas.length > maxCargas.length) {
+      maxCargas = vuln.cargas
+    }
+  }
+  return maxCargas.map((carga, index) => ({
+    index,
+    label: carga.label,
+    date: formatShortDate(carga.timestamp)
+  }))
+})
 
 const role = ref(localStorage.getItem('role') || 'operator')
 
@@ -649,6 +677,11 @@ onMounted(() => {
 .cargas-evolution {
   display: flex;
   gap: 0.35rem;
+  align-items: center;
+}
+.cargas-evolution-cell {
+  display: flex;
+  justify-content: center;
   align-items: center;
 }
 .carga-box {
