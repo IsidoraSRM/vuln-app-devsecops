@@ -18,6 +18,8 @@ from .db import Base, DATABASE_URL
 # We disable composite PKs on SQLite (e.g. for local testing).
 IS_SQLITE = DATABASE_URL.startswith("sqlite") if DATABASE_URL else False
 
+WAZUH_CONNECTIONS_ID_FK = "wazuh_connections.id"
+
 
 class User(Base):
     __tablename__ = "users"
@@ -28,7 +30,7 @@ class User(Base):
     is_default_password = Column(Boolean, nullable=False, default=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     role = Column(String, default="superadmin")
-    assigned_connection_id = Column(Integer, ForeignKey("wazuh_connections.id", ondelete="SET NULL"), nullable=True)
+    assigned_connection_id = Column(Integer, ForeignKey(WAZUH_CONNECTIONS_ID_FK, ondelete="SET NULL"), nullable=True)
     
     interactions = relationship("UserInteraction", back_populates="user")
     assigned_connection = relationship("WazuhConnection")
@@ -64,7 +66,7 @@ class UserInteraction(Base):
 class WazuhVulnerability(Base):
     __tablename__ = "wazuh_vulnerabilities"
     id = Column(Integer, primary_key=True, index=True, autoincrement=True)
-    connection_id = Column(Integer, ForeignKey("wazuh_connections.id"), nullable=False)
+    connection_id = Column(Integer, ForeignKey(WAZUH_CONNECTIONS_ID_FK), nullable=False)
     connection = relationship("WazuhConnection", back_populates="vulnerabilities")
     status = Column(String, default="ACTIVE")
     agent_id = Column(String, nullable=False, index=True)
@@ -123,6 +125,6 @@ class SyncRun(Base):
     __tablename__ = "sync_runs"
     id = Column(Integer, primary_key=True, index=True, autoincrement=True)
     connection_id = Column(
-        Integer, ForeignKey("wazuh_connections.id", ondelete="CASCADE"), nullable=False
+        Integer, ForeignKey(WAZUH_CONNECTIONS_ID_FK, ondelete="CASCADE"), nullable=False
     )
     timestamp = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
