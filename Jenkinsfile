@@ -71,7 +71,7 @@ pipeline {
                         docker run --rm \
                             -v "$WORKSPACE/frontend:/app" \
                             -w /app \
-                            node:20-alpine sh -c "
+                            node:22-alpine sh -c "
                                 npm ci --silent ;
                                 npm run test:coverage -- --run --reporter=junit --outputFile=test-results.xml ;
                                 npm run build
