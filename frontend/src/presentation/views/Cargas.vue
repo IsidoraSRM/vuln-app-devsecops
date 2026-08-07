@@ -2,7 +2,7 @@
   <div class="fade-in">
     <div class="header-actions">
       <div>
-        <h1 class="title">Evolución por Cargas</h1>
+        <h1 class="title">Evolución por Cargas 1</h1>
         <p class="subtitle">Monitorea el ciclo de vida de vulnerabilidades y su remediación a través de las sincronizaciones.</p>
       </div>
       <div>
