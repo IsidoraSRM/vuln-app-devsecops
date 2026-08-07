@@ -234,10 +234,9 @@ with open("docker-compose.dast.yml", "w") as f:
                 // La llave privada vive en la credencial Jenkins 'vuln-app-deploy' y se inyecta con sshagent.
                 // El .env (ENCRYPTION_KEY, SECRET_KEY, DATABASE_URL) y los certs de nginx ya existen y
                 // persisten en vuln-app, por eso aca solo se hace pull + rebuild del split app-only.
-                withCredentials([sshUserPrivateKey(credentialsId: 'vuln-app-deploy', keyFileVariable: 'SSH_KEY', usernameVariable: 'SSH_USER')]) {
+                sshagent(['vuln-app-deploy']) {
                     sh '''
-                        chmod 600 $SSH_KEY
-                        ssh -i $SSH_KEY -o StrictHostKeyChecking=no $SSH_USER@10.194.0.3 "
+                        ssh -o StrictHostKeyChecking=no vladhy_spiritualbo@10.194.0.3 "
                             cd ~/vuln-app-devsecops &&
                             git pull origin main &&
                             docker compose -f docker-compose.app-only.yml up -d --build &&
