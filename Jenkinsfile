@@ -228,36 +228,22 @@ with open("docker-compose.dast.yml", "w") as f:
 
         stage('CD: Deploy to Production') {
             steps {
-                echo '🚀 Desplegando versión actualizada en los contenedores de producción...'
-                sh '''
-                    # 1. Asegurar que existe el archivo .env
-                    if [ ! -f .env ]; then
-                        cp .env.example .env
-                    fi
-
-                    # 1b. Generar una ENCRYPTION_KEY efimera y valida (Fernet) para este build.
-                    ENC=$(python3 -c "import base64, os; print(base64.urlsafe_b64encode(os.urandom(32)).decode())")
-                    sed -i "s|^ENCRYPTION_KEY=.*|ENCRYPTION_KEY=$ENC|" .env
-
-                    # 2. Asegurar que la carpeta y certificados SSL existan para Nginx (usando Docker para evitar problemas de permisos del host)
-                    if [ ! -f ./nginx/ssl/nginx-selfsigned.crt ]; then
-                        echo "Generando certificados SSL autofirmados para Nginx usando Docker..."
-                        docker run --rm -v "$(pwd):/workspace" alpine sh -c "
-                            mkdir -p /workspace/nginx/ssl && \
-                            apk add --no-cache openssl && \
-                            openssl req -x509 -nodes -days 365 -newkey rsa:2048 \
-                                -keyout /workspace/nginx/ssl/nginx-selfsigned.key \
-                                -out /workspace/nginx/ssl/nginx-selfsigned.crt \
-                                -subj '/C=CL/ST=RM/L=Santiago/O=Desarrollo/CN=localhost'
+                echo 'Desplegando en vuln-app por SSH...'
+                // Despliega en el host de produccion (vuln-app, 10.194.0.3) via SSH.
+                // Solo corre si TODAS las etapas previas pasaron (tests + SonarQube gate + Trivy + ZAP).
+                // La llave privada vive en la credencial Jenkins 'vuln-app-deploy' y se inyecta con sshagent.
+                // El .env (ENCRYPTION_KEY, SECRET_KEY, DATABASE_URL) y los certs de nginx ya existen y
+                // persisten en vuln-app, por eso aca solo se hace pull + rebuild del split app-only.
+                sshagent(['vuln-app-deploy']) {
+                    sh '''
+                        ssh -o StrictHostKeyChecking=no vladhy_spiritualbo@10.194.0.3 "
+                            cd ~/vuln-app-devsecops &&
+                            git pull origin main &&
+                            docker compose -f docker-compose.app-only.yml up -d --build &&
+                            docker image prune -f
                         "
-                    fi
-
-                    # 3. Reconstruir e iniciar contenedores de producción (api, frontend, db-api)
-                    docker compose up -d --build
-
-                    # 4. Limpiar imágenes huérfanas/antiguas para ahorrar espacio en la VM
-                    docker image prune -f
-                '''
+                    '''
+                }
             }
         }
     }
