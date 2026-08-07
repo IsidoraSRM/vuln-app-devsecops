@@ -117,3 +117,12 @@ class VulnerabilityHistory(Base):
     details = Column(Text, nullable=True)
     timestamp = Column(DateTime(timezone=True), primary_key=not IS_SQLITE, server_default=func.now())
     vulnerability = relationship("WazuhVulnerability", back_populates="history")
+
+
+class SyncRun(Base):
+    __tablename__ = "sync_runs"
+    id = Column(Integer, primary_key=True, index=True, autoincrement=True)
+    connection_id = Column(
+        Integer, ForeignKey("wazuh_connections.id", ondelete="CASCADE"), nullable=False
+    )
+    timestamp = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)

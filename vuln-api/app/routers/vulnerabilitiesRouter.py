@@ -159,9 +159,8 @@ def list_vulns(
         # This represents the historical sync runs (cargas)
         # Limit to the last 5 loads, sorted chronologically ASC
         timestamps_res = db.execute(text("""
-            SELECT DISTINCT timestamp FROM vulnerability_history vh
-            JOIN wazuh_vulnerabilities wv ON vh.vulnerability_id = wv.id
-            WHERE wv.connection_id = :conn_id
+            SELECT DISTINCT timestamp FROM sync_runs
+            WHERE connection_id = :conn_id
             ORDER BY timestamp DESC
             LIMIT 5
         """), {"conn_id": cid}).fetchall()

@@ -41,6 +41,10 @@ def perform_sync_task(conn_id: int, username: str):
                 count += _process_pg_batch(db, conn.id, raw_vulns)
             _mark_obsolete_pg(db, conn.id, db_sync_time)
             
+        db.execute(
+            text("INSERT INTO sync_runs (connection_id, timestamp) VALUES (:conn_id, :ts)"),
+            {"conn_id": conn.id, "ts": db_sync_time}
+        )
         db.commit()
 
         try:
