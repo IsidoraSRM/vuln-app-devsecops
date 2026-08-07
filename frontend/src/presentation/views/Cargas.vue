@@ -328,7 +328,7 @@ const showFilters = ref(true)
 const formatShortDate = (dateString) => {
   if (!dateString) return 'N/D'
   const d = new Date(dateString)
-  if (isNaN(d.getTime())) return 'N/D'
+  if (Number.isNaN(d.getTime())) return 'N/D'
   const day = String(d.getDate()).padStart(2, '0')
   const month = String(d.getMonth() + 1).padStart(2, '0')
   const year = String(d.getFullYear()).slice(-2)
