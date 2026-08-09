@@ -5,7 +5,7 @@ from typing import Optional
 
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
-from sqlalchemy.sql import func
+from sqlalchemy.sql import func, text
 
 from ..db import get_db
 from ..models import User, WazuhVulnerability, VulnerabilityHistory
@@ -57,6 +57,52 @@ def _stats(days_values):
     }
 
 
+def _dwell_time_sql(db: Session, connection_id):
+    """Dwell-time calculado 100% en PostgreSQL con agregados nativos (avg, mediana, p90, min, max),
+    sin traer las filas a Python -> evita OOM y el sort en Python a gran escala. Da los MISMOS numeros
+    que el fallback Python: mediana con percentile_cont(0.5) (== statistics.median, interpola en n par)
+    y p90 con percentile_disc(0.9) (== nearest-rank del Python: ceil(0.9*n)-1). Ver get_dwell_time."""
+    cf = "AND v.connection_id = :cid" if connection_id else ""
+    params = {"cid": connection_id} if connection_id else {}
+    src = (
+        "FROM wazuh_vulnerabilities v "
+        "JOIN (SELECT vulnerability_id, MAX(timestamp) AS resolved_at FROM vulnerability_history "
+        "WHERE action = 'RESOLVED' GROUP BY vulnerability_id) h ON h.vulnerability_id = v.id "
+        "WHERE v.status = 'RESOLVED' AND v.first_seen IS NOT NULL " + cf
+    )
+    d = "GREATEST(EXTRACT(EPOCH FROM (h.resolved_at - v.first_seen)) / 86400.0, 0)"
+    aggs = (
+        "count(*), avg({d}), percentile_cont(0.5) WITHIN GROUP (ORDER BY {d}), "
+        "percentile_disc(0.9) WITHIN GROUP (ORDER BY {d}), min({d}), max({d})"
+    ).format(d=d)
+
+    def to_stats(r):
+        if not r or not r[0]:
+            return {"count": 0, "avg_days": None, "median_days": None,
+                    "p90_days": None, "min_days": None, "max_days": None}
+        return {"count": int(r[0]), "avg_days": round(float(r[1]), 2),
+                "median_days": round(float(r[2]), 2), "p90_days": round(float(r[3]), 2),
+                "min_days": round(float(r[4]), 2), "max_days": round(float(r[5]), 2)}
+
+    overall = db.execute(text("SELECT " + aggs + " " + src), params).fetchone()
+    sev_rows = db.execute(text(
+        "SELECT COALESCE(UPPER(v.severity), 'UNKNOWN') AS sev, " + aggs + " " + src +
+        " GROUP BY COALESCE(UPPER(v.severity), 'UNKNOWN') ORDER BY sev"), params).fetchall()
+    month_rows = db.execute(text(
+        "SELECT to_char(h.resolved_at, 'YYYY-MM') AS m, count(*), avg(" + d + ") " + src +
+        " GROUP BY to_char(h.resolved_at, 'YYYY-MM') ORDER BY m"), params).fetchall()
+
+    return {
+        "metric": "dwell_time", "unit": "days", "connection_id": connection_id,
+        "overall": to_stats(overall),
+        "by_severity": {r[0]: to_stats(r[1:]) for r in sev_rows},
+        "monthly_trend": [
+            {"month": r[0], "resolved_count": int(r[1]), "avg_days": round(float(r[2]), 2)}
+            for r in month_rows
+        ],
+    }
+
+
 @router.get("/dwell-time")
 def get_dwell_time(
     connection_id: Optional[int] = None,
@@ -68,6 +114,19 @@ def get_dwell_time(
     actual es RESOLVED (las reabiertas vuelven a ser ACTIVE y se excluyen).
     Devuelve agregados globales, por severidad y tendencia mensual para gráficos.
     """
+    # Operadores solo ven su conexion asignada (misma regla que /metrics/summary y /filters).
+    if current_user.role != "superadmin":
+        connection_id = current_user.assigned_connection_id or -1
+
+    # Ruta rapida: agregados con SQL nativo (percentile_cont/percentile_disc), sin traer filas a Python.
+    # El fallback de abajo (Python + statistics) queda para SQLite (tests) o si el SQL fallara.
+    from ..models import IS_SQLITE
+    if not IS_SQLITE:
+        try:
+            return _dwell_time_sql(db, connection_id)
+        except Exception:
+            db.rollback()
+
     resolved_events = (
         db.query(
             VulnerabilityHistory.vulnerability_id.label("vuln_id"),

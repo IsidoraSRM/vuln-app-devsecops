@@ -138,6 +138,105 @@ def test_scroll_clear_swallows_errors():
     wcs._scroll_clear(BrokenSession(), "https://x:9200", "s1")
 
 
+# scroll paralelo (sliced)
+
+
+def test_parallel_scroll_merges_all_slices(monkeypatch):
+    """El scroll paralelo cede la union de TODAS las slices, sin duplicados ni faltantes."""
+    def fake_start(session, url, slice_id, slice_max):
+        assert slice_max == 3
+        return f"sid-{slice_id}", [_hit(f"CVE-{slice_id}-a"), _hit(f"CVE-{slice_id}-b")]
+
+    monkeypatch.setattr(wcs, "_build_session", lambda u, p: object())
+    monkeypatch.setattr(wcs, "_scroll_start_sliced", fake_start)
+    monkeypatch.setattr(wcs, "_scroll_next", lambda s, u, sid: (None, []))
+    monkeypatch.setattr(wcs, "_scroll_clear", lambda *a, **k: None)
+
+    batches = list(wcs._iter_vulns_batches_parallel("https://x:9200", "u", "p", slices=3))
+
+    cves = sorted(v["vulnerability"]["id"] for b in batches for v in b)
+    assert cves == ["CVE-0-a", "CVE-0-b", "CVE-1-a", "CVE-1-b", "CVE-2-a", "CVE-2-b"]
+
+
+def test_parallel_scroll_propagates_worker_error(monkeypatch):
+    """Si una slice falla, el error se propaga (sync incompleto no debe pasar silencioso)."""
+    def fake_start(session, url, slice_id, slice_max):
+        if slice_id == 1:
+            raise requests.exceptions.ConnectionError("boom")
+        return None, [_hit(f"CVE-{slice_id}")]
+
+    monkeypatch.setattr(wcs, "_build_session", lambda u, p: object())
+    monkeypatch.setattr(wcs, "_scroll_start_sliced", fake_start)
+    monkeypatch.setattr(wcs, "_scroll_next", lambda s, u, sid: (None, []))
+    monkeypatch.setattr(wcs, "_scroll_clear", lambda *a, **k: None)
+
+    with pytest.raises(requests.exceptions.ConnectionError):
+        list(wcs._iter_vulns_batches_parallel("https://x:9200", "u", "p", slices=3))
+
+
+def test_iter_batches_uses_parallel_when_slices_env_set(monkeypatch):
+    """iter_vulns_batches delega al scroll paralelo cuando SYNC_SCROLL_SLICES>=2."""
+    called = {}
+
+    def fake_parallel(url, u, p, slices):
+        called["slices"] = slices
+        yield [{"vulnerability": {"id": "CVE-X"}}]
+
+    monkeypatch.setenv("SYNC_SCROLL_SLICES", "4")
+    monkeypatch.setattr(wcs, "_iter_vulns_batches_parallel", fake_parallel)
+
+    batches = list(wcs.iter_vulns_batches("https://x:9200", "u", "p"))
+
+    assert called["slices"] == 4
+    assert batches == [[{"vulnerability": {"id": "CVE-X"}}]]
+
+
+def test_iter_batches_sequential_when_slices_unset(monkeypatch):
+    """Sin SYNC_SCROLL_SLICES (default 1) usa el path secuencial, no el paralelo."""
+    monkeypatch.delenv("SYNC_SCROLL_SLICES", raising=False)
+
+    def _boom(*a, **k):
+        raise AssertionError("no deberia usar el path paralelo con slices=1")
+
+    monkeypatch.setattr(wcs, "_iter_vulns_batches_parallel", _boom)
+    session = FakeSession([
+        FakeResponse(200, {"_scroll_id": None, "hits": {"hits": [_hit("CVE-1")]}}),
+    ])
+    monkeypatch.setattr(wcs, "_build_session", lambda u, p: session)
+
+    batches = list(wcs.iter_vulns_batches("https://x:9200", "u", "p"))
+    assert [v["vulnerability"]["id"] for v in batches[0]] == ["CVE-1"]
+
+
+class CapSession:
+    """Captura el body del ultimo .post() para inspeccionar el request enviado."""
+    def __init__(self, response):
+        self.response = response
+        self.body = None
+
+    def post(self, url, json=None, **kwargs):
+        self.body = json
+        return self.response
+
+
+def test_scroll_start_sliced_includes_slice_clause():
+    """Con slice_max>=2 el request lleva la clausula slice {id, max} y el _source hoja."""
+    sess = CapSession(FakeResponse(200, {"_scroll_id": "s", "hits": {"hits": [_hit("CVE-1")]}}))
+    scroll_id, hits = wcs._scroll_start_sliced(sess, "https://x:9200", 1, 4)
+    assert scroll_id == "s"
+    assert len(hits) == 1
+    assert sess.body["slice"] == {"id": 1, "max": 4}
+    assert sess.body["_source"] == wcs.VULN_SOURCE_FIELDS
+    assert sess.body["sort"] == ["_doc"]
+
+
+def test_scroll_start_sliced_omits_clause_when_single():
+    """Con slice_max<2 NO se agrega la clausula slice (equivale al scroll normal)."""
+    sess = CapSession(FakeResponse(200, {"_scroll_id": None, "hits": {"hits": []}}))
+    wcs._scroll_start_sliced(sess, "https://x:9200", 0, 1)
+    assert "slice" not in sess.body
+
+
 # fetch_all_vulns
 
 

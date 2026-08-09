@@ -41,6 +41,13 @@ def list_vulns(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
+    # Tope de paginacion: sin esto, una llamada con limit=None (o un limit enorme) carga TODA
+    # la tabla + su historial (selectinload) a memoria -> OOM a escala de millones. El frontend
+    # pagina con limit=50; 500 es un maximo generoso. Para "exportar todo" iria un endpoint aparte.
+    MAX_PAGE_LIMIT = 500
+    if limit is None or limit > MAX_PAGE_LIMIT:
+        limit = MAX_PAGE_LIMIT
+
     # 1. Ejecutar el Procedimiento Almacenado para el filtrado masivo
     days_ago = None
     if detected_after:
@@ -320,9 +327,24 @@ def get_metrics_summary(
     if current_user.role != "superadmin":
         connection_id = current_user.assigned_connection_id or -1
 
-    query = db.query(WazuhVulnerability).filter(WazuhVulnerability.status == "ACTIVE")
-    if connection_id is not None:
-        query = query.filter(WazuhVulnerability.connection_id == connection_id)
+    # Ruta rapida: leer el resumen PRE-AGREGADO de mv_metrics_summary (refrescada en cada sync).
+    # Evita el COUNT(DISTINCT cve_id) en vivo, que medido tarda ~4.4s a 2M filas POR CADA carga.
+    # connection_id con valor -> esa conexion; None -> fila grand-total (connection_id IS NULL).
+    try:
+        if connection_id is not None:
+            row = db.execute(text(
+                "SELECT total, critical, high, medium, low FROM mv_metrics_summary WHERE connection_id = :cid"
+            ), {"cid": connection_id}).fetchone()
+        else:
+            row = db.execute(text(
+                "SELECT total, critical, high, medium, low FROM mv_metrics_summary WHERE connection_id IS NULL"
+            )).fetchone()
+        if row is None:
+            return {"total": 0, "critical": 0, "high": 0, "medium": 0, "low": 0}
+        return {"total": row[0], "critical": row[1], "high": row[2], "medium": row[3], "low": row[4]}
+    except Exception:
+        # Fallback (SQLite/tests o si la MV aun no existe): calculo en vivo (logica original).
+        db.rollback()
 
     # Group by severity and count distinct CVE IDs
     severity_query = db.query(

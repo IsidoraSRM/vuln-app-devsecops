@@ -96,6 +96,22 @@ def setup_db_optimizations():
             CREATE MATERIALIZED VIEW IF NOT EXISTS mv_unique_os AS 
             SELECT DISTINCT connection_id, os_platform, os_version FROM wazuh_vulnerabilities;
         """))
+        # Resumen del dashboard PRE-AGREGADO (mv_metrics_summary). Medido: el COUNT(DISTINCT cve_id)
+        # en vivo tarda ~4.4s a 2M filas POR CADA carga del dashboard; leerlo de la MV es ~0.5ms.
+        # GROUPING SETS ((connection_id),()) da una fila por conexion + una grand-total (connection_id
+        # NULL) para "todas las conexiones". El refresh (1 vez por sync) hace el trabajo pesado.
+        db.execute(text("""
+            CREATE MATERIALIZED VIEW IF NOT EXISTS mv_metrics_summary AS
+            SELECT connection_id,
+                COUNT(DISTINCT cve_id) AS total,
+                COUNT(DISTINCT cve_id) FILTER (WHERE UPPER(severity) = 'CRITICAL') AS critical,
+                COUNT(DISTINCT cve_id) FILTER (WHERE UPPER(severity) = 'HIGH') AS high,
+                COUNT(DISTINCT cve_id) FILTER (WHERE UPPER(severity) = 'MEDIUM') AS medium,
+                COUNT(DISTINCT cve_id) FILTER (WHERE UPPER(severity) NOT IN ('CRITICAL','HIGH','MEDIUM') OR severity IS NULL) AS low
+            FROM wazuh_vulnerabilities
+            WHERE status = 'ACTIVE'
+            GROUP BY GROUPING SETS ((connection_id), ());
+        """))
         db.execute(text("""
             CREATE OR REPLACE FUNCTION refresh_vulnerability_filters() RETURNS void AS $$
             BEGIN
@@ -104,6 +120,7 @@ def setup_db_optimizations():
                 REFRESH MATERIALIZED VIEW mv_unique_packages;
                 REFRESH MATERIALIZED VIEW mv_unique_severities;
                 REFRESH MATERIALIZED VIEW mv_unique_os;
+                REFRESH MATERIALIZED VIEW mv_metrics_summary;
             END;
             $$ LANGUAGE plpgsql;
         """))

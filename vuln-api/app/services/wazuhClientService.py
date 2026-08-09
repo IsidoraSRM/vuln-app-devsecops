@@ -1,5 +1,8 @@
 # app/wazuh_client.py
 import logging
+import os
+import queue as _queue
+import threading
 from typing import Generator, List, Dict, Any, Tuple, Optional
 
 import requests
@@ -21,6 +24,23 @@ VULN_INDEX = "wazuh-states-vulnerabilities-*"
 SCROLL_TTL = "2m"
 BATCH_SIZE = 10000
 REQUEST_TIMEOUT = 60
+
+# Pedimos del _source EXACTAMENTE las hojas que el sync lee (ver _process_pg_batch). Los docs
+# reales de Wazuh traen muchos campos que no usamos (wazuh.*, @timestamp, event.*, y hojas no
+# usadas dentro de vulnerability/package/agent como category, classification, ephemeral_id...);
+# pedir solo estas hojas reduce el payload de red y el parseo JSON en cada batch. La lista refleja
+# 1:1 los .get() de _process_pg_batch: pedir un campo extra no aportaria (el codigo no lo mira) y
+# omitir una hoja usada la dejaria en None. OpenSearch preserva la estructura anidada al filtrar.
+VULN_SOURCE_FIELDS = [
+    "agent.id", "agent.name",
+    "host.os.full", "host.os.platform", "host.os.version",
+    "package.name", "package.version", "package.type", "package.architecture",
+    "vulnerability.id", "vulnerability.severity",
+    "vulnerability.score.base", "vulnerability.score.version",
+    "vulnerability.detected_at", "vulnerability.published_at",
+    "vulnerability.description", "vulnerability.reference",
+    "vulnerability.scanner.vendor",
+]
 
 # Errores que justifican reintento: red caida, timeout, server 5xx.
 # NO se reintenta auth invalida (401), not-found (404) ni payload invalido (400):
@@ -66,7 +86,7 @@ def _scroll_start(
 ) -> Tuple[Optional[str], List[Dict[str, Any]]]:
     url = f"{indexer_url}/{VULN_INDEX}/_search?scroll={SCROLL_TTL}"
     # sort=_doc es el orden mas eficiente para scroll (no calcula scoring)
-    body = {"size": BATCH_SIZE, "_source": True, "sort": ["_doc"]}
+    body = {"size": BATCH_SIZE, "_source": VULN_SOURCE_FIELDS, "sort": ["_doc"]}
     resp = session.post(url, json=body, timeout=REQUEST_TIMEOUT)
     resp.raise_for_status()
     data = resp.json()
@@ -99,6 +119,127 @@ def _scroll_clear(
         pass
 
 
+@with_retry
+def _scroll_start_sliced(
+    session: requests.Session, indexer_url: str, slice_id: int, slice_max: int
+) -> Tuple[Optional[str], List[Dict[str, Any]]]:
+    # Igual que _scroll_start pero pidiendo solo una "slice" del scroll. OpenSearch reparte los
+    # docs entre slice_max slices DISJUNTAS (por hash de _id): la union de todas = todos los docs,
+    # sin solaparse. Asi K workers pueden traer K slices EN PARALELO. Con slice_max<2 no se
+    # agrega la clausula (equivale al scroll normal), para que slices=1 sea seguro.
+    url = f"{indexer_url}/{VULN_INDEX}/_search?scroll={SCROLL_TTL}"
+    body: Dict[str, Any] = {"size": BATCH_SIZE, "_source": VULN_SOURCE_FIELDS, "sort": ["_doc"]}
+    if slice_max >= 2:
+        body["slice"] = {"id": slice_id, "max": slice_max}
+    resp = session.post(url, json=body, timeout=REQUEST_TIMEOUT)
+    resp.raise_for_status()
+    data = resp.json()
+    return data.get("_scroll_id"), data["hits"]["hits"]
+
+
+def _get_scroll_slices() -> int:
+    """Cantidad de slices para el scroll paralelo. Default 1 = scroll secuencial de siempre.
+    Se configura por env SYNC_SCROLL_SLICES (ideal ~= nro de shards del indice de Wazuh)."""
+    try:
+        return max(1, int(os.getenv("SYNC_SCROLL_SLICES", "1")))
+    except (TypeError, ValueError):
+        return 1
+
+
+def _put_blocking(q: "_queue.Queue", item: Any, stop: threading.Event) -> None:
+    """put en la cola que puede abortar si `stop` se activa: evita que un worker se cuelgue en
+    q.put (cola llena) cuando el consumidor abandono (p.ej. por un error de BD)."""
+    while not stop.is_set():
+        try:
+            q.put(item, timeout=0.5)
+            return
+        except _queue.Full:
+            continue
+
+
+def _iter_vulns_batches_parallel(
+    indexer_url: str, wazuh_user: str, wazuh_password: str, slices: int
+) -> Generator[List[Dict[str, Any]], None, None]:
+    """Scroll PARALELO con sliced scroll de OpenSearch. Lanza `slices` workers; cada uno scrollea
+    su slice (subconjunto disjunto de docs) y empuja batches a una cola ACOTADA. Este generador
+    -consumidor unico- los cede en el orden en que llegan. Beneficios: (1) el fetch de red -el
+    cuello del sync- se paraleliza K veces; (2) prefetch gratis: los workers van adelantados
+    mientras la BD procesa el batch anterior. La cola acotada da backpressure (no explota memoria).
+    Correctitud: union de slices = TODOS los docs sin duplicados (garantia de OpenSearch); el
+    consumidor procesa cada batch igual que el path secuencial (mismo TRUNCATE+insert+upsert)."""
+    q: "_queue.Queue" = _queue.Queue(maxsize=slices * 2)
+    _DONE = object()
+    stop = threading.Event()
+    errors: List[BaseException] = []
+
+    def worker(slice_id: int) -> None:
+        session = _build_session(wazuh_user, wazuh_password)
+        scroll_id = None
+        try:
+            scroll_id, hits = _scroll_start_sliced(session, indexer_url, slice_id, slices)
+            while hits and not stop.is_set():
+                _put_blocking(q, [h["_source"] for h in hits], stop)
+                if stop.is_set() or not scroll_id:
+                    break
+                scroll_id, hits = _scroll_next(session, indexer_url, scroll_id)
+        except Exception as exc:  # noqa: BLE001 - se propaga tras drenar (ver abajo)
+            errors.append(exc)
+        finally:
+            if scroll_id:
+                _scroll_clear(session, indexer_url, scroll_id)
+            _put_blocking(q, _DONE, stop)
+
+    threads = [
+        threading.Thread(target=worker, args=(i,), daemon=True, name=f"wazuh-slice-{i}")
+        for i in range(slices)
+    ]
+    for t in threads:
+        t.start()
+    log.info(
+        "wazuh_scroll_parallel_started",
+        extra={"indexer_url": indexer_url, "slices": slices, "batch_size": BATCH_SIZE},
+    )
+
+    finished = 0
+    total = 0
+    batch_number = 0
+    try:
+        while finished < slices:
+            try:
+                item = q.get(timeout=1.0)
+            except _queue.Empty:
+                # Salvaguarda anti-cuelgue: si ningun worker sigue vivo, no esperamos mas _DONE.
+                if not any(t.is_alive() for t in threads):
+                    break
+                continue
+            if item is _DONE:
+                finished += 1
+                continue
+            batch_number += 1
+            total += len(item)
+            yield item
+    finally:
+        # Si el consumidor abandona (p.ej. error de BD en wazuhService), avisamos stop y drenamos
+        # la cola hasta que todos los workers mueran. Evita cuelgues en el join de threads daemon.
+        stop.set()
+        while any(t.is_alive() for t in threads):
+            try:
+                while True:
+                    q.get_nowait()
+            except _queue.Empty:
+                pass
+            for t in threads:
+                t.join(timeout=0.1)
+        log.info(
+            "wazuh_scroll_parallel_finished",
+            extra={"batches": batch_number, "total_hits": total, "slices": slices},
+        )
+
+    if errors:
+        # Un slice que fallo = sync incompleto -> propagar (wazuhService hace rollback).
+        raise errors[0]
+
+
 def iter_vulns_batches(
     indexer_url: str, wazuh_user: str, wazuh_password: str
 ) -> Generator[List[Dict[str, Any]], None, None]:
@@ -107,7 +248,13 @@ def iter_vulns_batches(
     Yield: lista de _source por batch (max BATCH_SIZE elementos).
     Permite procesar datasets >10k sin cargar todo en memoria.
     Reintenta automaticamente errores transitorios de red o 5xx del server.
+    Con SYNC_SCROLL_SLICES>=2 usa scroll PARALELO (sliced); default 1 = secuencial.
     """
+    slices = _get_scroll_slices()
+    if slices >= 2:
+        yield from _iter_vulns_batches_parallel(indexer_url, wazuh_user, wazuh_password, slices)
+        return
+
     session = _build_session(wazuh_user, wazuh_password)
     log.info("wazuh_scroll_started", extra={"indexer_url": indexer_url, "batch_size": BATCH_SIZE})
     scroll_id, hits = _scroll_start(session, indexer_url)

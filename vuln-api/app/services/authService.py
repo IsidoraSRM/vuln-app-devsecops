@@ -12,7 +12,11 @@ from sqlalchemy.orm import Session
 from ..db import get_db
 from ..models import User
 
-SECRET_KEY = os.getenv("JWT_SECRET", "dev-secret-key")
+# Clave de firma de los JWT. Se lee SECRET_KEY (la que setean docker-compose y el .env);
+# JWT_SECRET queda como alias por compatibilidad. El default 'dev-secret-key' es SOLO para
+# desarrollo local — antes se usaba SIEMPRE porque el codigo leia JWT_SECRET (que nadie setea),
+# dejando los tokens firmados con una clave publica y predecible (riesgo de forja/auth bypass).
+SECRET_KEY = os.getenv("SECRET_KEY") or os.getenv("JWT_SECRET") or "dev-secret-key"
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 60
 

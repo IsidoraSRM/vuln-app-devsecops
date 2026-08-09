@@ -1,5 +1,7 @@
 from datetime import datetime, timedelta
 
+from sqlalchemy import text
+
 from app.models import User, WazuhConnection, WazuhVulnerability, VulnerabilityHistory
 from app.services.authService import hash_password
 from app.crypto import encrypt
@@ -171,3 +173,58 @@ def test_dwell_time_multiple_resolved_uses_latest(client, db_session):
     body = res.json()
     assert body["overall"]["count"] == 1
     assert body["overall"]["avg_days"] == 9.0
+
+
+def test_metrics_summary(client, db_session):
+    """Cubre GET /vulns/metrics/summary en sus DOS rutas: lectura de la vista
+    materializada mv_metrics_summary (Postgres/CI) y el fallback en vivo (SQLite/local)."""
+    _create_user(db_session)
+    conn = _create_connection(db_session)
+    # 2 CVEs distintas ACTIVE: una Critical y una High
+    _create_vuln(db_session, conn.id, "CVE-2026-1001", severity="Critical", status="ACTIVE")
+    _create_vuln(db_session, conn.id, "CVE-2026-1002", severity="High", status="ACTIVE")
+    # En Postgres refrescamos la MV para que refleje los datos recien insertados. En SQLite
+    # la funcion no existe (falla -> rollback) y el endpoint usa el calculo en vivo (fallback).
+    try:
+        db_session.execute(text("SELECT refresh_vulnerability_filters();"))
+        db_session.commit()
+    except Exception:
+        db_session.rollback()
+    headers = _get_headers(client)
+
+    res = client.get("/vulns/metrics/summary", headers=headers)
+    assert res.status_code == 200
+    body = res.json()
+    assert body["total"] == 2
+    assert body["critical"] == 1
+    assert body["high"] == 1
+    assert body["medium"] == 0
+    assert body["low"] == 0
+
+
+def test_metrics_summary_by_connection(client, db_session):
+    """El resumen se puede filtrar por conexion. Una conexion con datos devuelve sus
+    conteos; una conexion sin vulnerabilidades ACTIVE devuelve ceros (fila inexistente
+    en la MV -> row None). Cubre la ruta connection_id-especifica y el retorno de ceros."""
+    _create_user(db_session)
+    conn_a = _create_connection(db_session, name="conn-a")
+    conn_b = _create_connection(db_session, name="conn-b")
+    _create_vuln(db_session, conn_a.id, "CVE-2026-2001", severity="Critical", status="ACTIVE")
+    try:
+        db_session.execute(text("SELECT refresh_vulnerability_filters();"))
+        db_session.commit()
+    except Exception:
+        db_session.rollback()
+    headers = _get_headers(client)
+
+    # conn_a: tiene 1 CVE Critical activa
+    res_a = client.get(f"/vulns/metrics/summary?connection_id={conn_a.id}", headers=headers)
+    assert res_a.status_code == 200
+    assert res_a.json()["total"] == 1
+    assert res_a.json()["critical"] == 1
+
+    # conn_b: sin vulnerabilidades activas -> todo en cero
+    res_b = client.get(f"/vulns/metrics/summary?connection_id={conn_b.id}", headers=headers)
+    assert res_b.status_code == 200
+    assert res_b.json()["total"] == 0
+    assert res_b.json()["critical"] == 0
