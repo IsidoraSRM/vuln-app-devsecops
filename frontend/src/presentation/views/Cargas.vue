@@ -188,6 +188,13 @@
         <div class="cargas-pagination-nav">
           <button 
             class="btn-cargas-page" 
+            @click="toggleCargasOrder"
+            title="Cambiar orden cronológico de las columnas"
+          >
+            Orden: {{ cargasOrder === 'asc' ? 'Antiguas primero ➔' : 'Recientes primero ➔' }}
+          </button>
+          <button 
+            class="btn-cargas-page" 
             :disabled="!hasOlderCargas" 
             @click="olderCargas"
             title="Ver cargas más antiguas"
@@ -355,6 +362,12 @@ const showFilters = ref(true)
 const cargasPage = ref(1)
 const cargasLimit = ref(10)
 const cargasTotal = ref(0)
+const cargasOrder = ref('asc')
+
+const toggleCargasOrder = () => {
+  cargasOrder.value = cargasOrder.value === 'asc' ? 'desc' : 'asc'
+  fetchVulns()
+}
 
 const hasOlderCargas = computed(() => cargasPage.value * cargasLimit.value < cargasTotal.value)
 const hasNewerCargas = computed(() => cargasPage.value > 1)
@@ -487,6 +500,7 @@ const fetchVulns = async () => {
       score_max: scoreMax.value,
       cargas_page: cargasPage.value,
       cargas_limit: cargasLimit.value,
+      cargas_order: cargasOrder.value,
     }
 
     const res = await vulnService.getVulns(params)

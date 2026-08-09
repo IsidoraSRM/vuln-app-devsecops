@@ -55,6 +55,9 @@ export default {
         if (params.cargas_limit !== undefined && params.cargas_limit !== null) {
             queryParams.cargas_limit = params.cargas_limit
         }
+        if (params.cargas_order) {
+            queryParams.cargas_order = params.cargas_order
+        }
 
         return apiClient.get('/vulns', {
             params: queryParams,

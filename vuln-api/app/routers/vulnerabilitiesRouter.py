@@ -40,6 +40,7 @@ def list_vulns(
     sort_order: Optional[str] = 'desc',
     cargas_page: int = 1,
     cargas_limit: int = 10,
+    cargas_order: str = 'asc',
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -218,7 +219,7 @@ def list_vulns(
             if dt:
                 global_rank = total_runs_for_cid - offset - idx
                 parsed_ts.append((dt, global_rank))
-        connection_syncs[cid] = sorted(parsed_ts, key=lambda x: x[0])
+        connection_syncs[cid] = sorted(parsed_ts, key=lambda x: x[0], reverse=(cargas_order == 'desc'))
 
     items = []
     for v in vulns:
@@ -293,7 +294,8 @@ def list_vulns(
         "items": items,
         "cargas_total": cargas_total,
         "cargas_page": cargas_page,
-        "cargas_limit": cargas_limit
+        "cargas_limit": cargas_limit,
+        "cargas_order": cargas_order
     }
 
 @router.get("/filters")
