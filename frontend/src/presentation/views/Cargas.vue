@@ -885,6 +885,9 @@ th { cursor: pointer; }
   background-color: var(--bg-card) !important;
   z-index: 5;
   border-right: 1px solid var(--border);
+  width: 110px !important;
+  min-width: 110px !important;
+  max-width: 110px !important;
 }
 
 .vuln-table th:first-child {
@@ -899,25 +902,14 @@ th { cursor: pointer; }
   background-color: var(--bg-card) !important;
   z-index: 5;
   border-right: 1px solid var(--border);
+  width: 200px !important;
+  min-width: 200px !important;
+  max-width: 200px !important;
 }
 
 .vuln-table th:nth-child(2) {
   background-color: var(--bg-panel) !important;
   z-index: 6;
-}
-
-.vuln-table th:first-child,
-.vuln-table td:first-child {
-  width: 110px !important;
-  min-width: 110px !important;
-  max-width: 110px !important;
-}
-
-.vuln-table th:nth-child(2),
-.vuln-table td:nth-child(2) {
-  width: 200px !important;
-  min-width: 200px !important;
-  max-width: 200px !important;
 }
 
 .vuln-table th:not(:first-child):not(:nth-child(2)),
