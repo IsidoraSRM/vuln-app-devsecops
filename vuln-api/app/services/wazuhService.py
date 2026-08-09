@@ -155,6 +155,11 @@ def _process_pg_batch(db: Session, conn_id: int, raw_vulns: list) -> int:
         
     values = list(unique_batch_vulns.values())
 
+    # Las TEMP tables son por-CONEXION. Con commit por lote, un commit devuelve la conexion al pool
+    # y el siguiente batch puede tomar OTRA conexion (sobre todo con requests concurrentes en prod)
+    # donde la temp table no existe -> "relation temp_wazuh_vulns does not exist". Re-asegurarla por
+    # batch (IF NOT EXISTS = idempotente y barato) hace el sync robusto al cambio de conexion.
+    _prepare_pg_temp_table(db)
     db.execute(text("TRUNCATE temp_wazuh_vulns;"))
 
     # Insercion masiva del batch en la tabla temporal con execute_values (UNA sola sentencia
