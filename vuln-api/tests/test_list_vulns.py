@@ -1,4 +1,6 @@
 """Tests de GET /vulns: filtros combinables, rangos de score y ordenamiento."""
+from sqlalchemy import text
+
 from app.models import User, WazuhConnection, WazuhVulnerability
 from app.services.authService import hash_password
 from app.crypto import encrypt
@@ -103,6 +105,13 @@ def test_sort_by_score_asc_and_desc(client, db_session):
 def test_pagination_totals(client, db_session):
     _create_user(db_session)
     _seed(db_session)
+    # /vulns saca el total de mv_vuln_counts cuando no hay filtros avanzados; refrescarla tras el
+    # seed para que refleje los datos (en SQLite la fn no existe -> el endpoint usa el conteo en vivo).
+    try:
+        db_session.execute(text("SELECT refresh_vulnerability_filters();"))
+        db_session.commit()
+    except Exception:
+        db_session.rollback()
     headers = _get_headers(client)
 
     res = client.get("/vulns?limit=2&page=1", headers=headers)
@@ -135,3 +144,23 @@ def test_filter_by_os_platform(client, db_session):
     res = client.get("/vulns?os_platform=ubuntu&os_platform=windows", headers=headers)
     assert res.status_code == 200
     assert sorted(_cves(res)) == ["CVE-2026-0001", "CVE-2026-0002", "CVE-2026-0003"]
+
+
+def test_totals_via_mv_and_fallback(client, db_session):
+    """El total es correcto por AMBOS caminos: la MV mv_vuln_counts (filtro comun = severidad) y el
+    conteo en vivo (filtro avanzado = os_platform, que la MV no cubre -> fallback)."""
+    _create_user(db_session)
+    _seed(db_session)
+    try:
+        db_session.execute(text("SELECT refresh_vulnerability_filters();"))
+        db_session.commit()
+    except Exception:
+        db_session.rollback()
+    headers = _get_headers(client)
+
+    # filtro comun (severidad) -> total via mv_vuln_counts
+    res = client.get("/vulns?severity=Critical", headers=headers)
+    assert res.json()["total"] == 1
+    # filtro avanzado (os_platform) -> total via conteo en vivo (fallback)
+    res = client.get("/vulns?os_platform=ubuntu", headers=headers)
+    assert res.json()["total"] == 2

@@ -112,6 +112,16 @@ def setup_db_optimizations():
             WHERE status = 'ACTIVE'
             GROUP BY GROUPING SETS ((connection_id), ());
         """))
+        # Conteos PRE-AGREGADOS por (conexion, estado, severidad) para el TOTAL de la lista /vulns.
+        # Contar el subconjunto filtrado en vivo (id IN (SELECT id FROM sp(...))) tarda ~1.6s a 1M;
+        # sumar sobre esta MV (~20 filas) es ~0.1ms. list_vulns la usa cuando el filtro es solo
+        # estado/severidad/conexion (el caso del dashboard); con filtros avanzados cae al conteo en vivo.
+        db.execute(text("""
+            CREATE MATERIALIZED VIEW IF NOT EXISTS mv_vuln_counts AS
+            SELECT connection_id, UPPER(status) AS status, UPPER(severity) AS severity, COUNT(*) AS n
+            FROM wazuh_vulnerabilities
+            GROUP BY connection_id, UPPER(status), UPPER(severity);
+        """))
         db.execute(text("""
             CREATE OR REPLACE FUNCTION refresh_vulnerability_filters() RETURNS void AS $$
             BEGIN
@@ -121,6 +131,7 @@ def setup_db_optimizations():
                 REFRESH MATERIALIZED VIEW mv_unique_severities;
                 REFRESH MATERIALIZED VIEW mv_unique_os;
                 REFRESH MATERIALIZED VIEW mv_metrics_summary;
+                REFRESH MATERIALIZED VIEW mv_vuln_counts;
             END;
             $$ LANGUAGE plpgsql;
         """))

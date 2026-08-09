@@ -125,7 +125,37 @@ def list_vulns(
     if score_max is not None:
         query = query.filter(WazuhVulnerability.score_base <= score_max)
 
-    total_count = query.count()
+    # Conteo del total. Fast-path: si el filtro es SOLO estado/severidad/conexion (el caso del
+    # dashboard), el total sale de mv_vuln_counts (precalculada, ~20 filas -> ~0.1ms) en vez de contar
+    # millones de filas via el semi-join id IN (SELECT id FROM sp(...)) (~1.6s a 1M). Con filtros
+    # avanzados (os/agente/cve/paquete/score/fecha), que la MV no cubre, cae al conteo en vivo.
+    has_advanced_filter = bool(
+        os_platform or agent_name or cve_id or package_name
+        or score_min is not None or score_max is not None
+        or detected_after or detected_before
+    )
+    total_count = None
+    if sp_exists and not has_advanced_filter:
+        try:
+            if current_user.role != "superadmin":
+                eff_conn = current_user.assigned_connection_id or -1
+            else:
+                eff_conn = connection_id
+            total_count = int(db.execute(text("""
+                SELECT COALESCE(SUM(n), 0) FROM mv_vuln_counts
+                WHERE (:conn IS NULL OR connection_id = :conn)
+                  AND (:statuses::text[] IS NULL OR status = ANY(:statuses::text[]))
+                  AND (:sevs::text[] IS NULL OR severity = ANY(:sevs::text[]))
+            """).bindparams(
+                conn=eff_conn,
+                statuses=[status.upper()] if status else None,
+                sevs=[s.upper() for s in severity] if severity else None,
+            )).scalar())
+        except Exception:
+            db.rollback()
+            total_count = None
+    if total_count is None:
+        total_count = query.count()
 
     if sort_key and hasattr(WazuhVulnerability, sort_key):
         column = getattr(WazuhVulnerability, sort_key)

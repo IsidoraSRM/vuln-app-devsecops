@@ -237,6 +237,47 @@ def test_scroll_start_sliced_omits_clause_when_single():
     assert "slice" not in sess.body
 
 
+# log de progreso adaptativo
+
+
+def test_progress_step_scales_with_total():
+    """El paso de log escala con el total (~20 lineas); total desconocido o chico -> un batch."""
+    assert wcs._progress_step(0) == wcs.BATCH_SIZE
+    assert wcs._progress_step(5000) == wcs.BATCH_SIZE
+    assert wcs._progress_step(200000) == 10000       # 200k/20
+    assert wcs._progress_step(4000000) == 200000     # 4M/20 -> ~20 lineas, no ~400
+
+
+def test_count_vulns_and_safe_count(monkeypatch):
+    """_count_vulns lee el _count del indexer; _safe_count devuelve 0 si falla (fallback a log/batch)."""
+    class OkSession:
+        def get(self, url, **k):
+            return FakeResponse(200, {"count": 1234})
+
+    assert wcs._count_vulns(OkSession(), "https://x:9200") == 1234
+    assert wcs._safe_count(OkSession(), "https://x:9200") == 1234
+
+    class BoomSession:
+        def get(self, url, **k):
+            raise requests.exceptions.ConnectionError()
+
+    _no_wait(monkeypatch, wcs._count_vulns)
+    assert wcs._safe_count(BoomSession(), "https://x:9200") == 0
+
+
+def test_log_scroll_progress_is_adaptive():
+    """Loguea el primer batch y luego cada `step` docs -> NO una por batch."""
+    last, logs = 0, []
+    for b in range(1, 101):  # 100 batches de 200 = 20000 docs, step=10000
+        total = b * 200
+        new_last = wcs._log_scroll_progress(b, total, 20000, last, 10000)
+        if new_last != last:
+            logs.append((b, total))
+        last = new_last
+    assert logs[0] == (1, 200)      # primer batch siempre (feedback temprano)
+    assert 2 <= len(logs) <= 5      # ~cada 10000 docs, NO una por batch (serian 100)
+
+
 # fetch_all_vulns
 
 

@@ -120,6 +120,42 @@ def _scroll_clear(
 
 
 @with_retry
+def _count_vulns(session: requests.Session, indexer_url: str) -> int:
+    resp = session.get(f"{indexer_url}/{VULN_INDEX}/_count", timeout=REQUEST_TIMEOUT)
+    resp.raise_for_status()
+    return int(resp.json().get("count", 0))
+
+
+def _safe_count(session: requests.Session, indexer_url: str) -> int:
+    """Total de vulns (para calcular cada cuanto loguear el progreso). Si falla -> 0 = log por batch."""
+    try:
+        return _count_vulns(session, indexer_url)
+    except Exception:  # NOSONAR - best-effort; sin total, se cae a log por batch
+        return 0
+
+
+def _progress_step(grand_total: int) -> int:
+    """Cada cuantos docs loguear el progreso: apunta a ~20 lineas SIN IMPORTAR el tamano
+    (grand_total/20), pero nunca mas fino que un batch. Total desconocido (0) -> por batch."""
+    if grand_total <= 0:
+        return BATCH_SIZE
+    return max(BATCH_SIZE, grand_total // 20)
+
+
+def _log_scroll_progress(batch_number: int, total: int, grand_total: int, last_logged: int, step: int) -> int:
+    """Loguea 'wazuh_scroll_batch' si toca: el primer batch (feedback temprano) o cada `step` docs
+    desde el ultimo log. Asi el progreso escala (~20 lineas a cualquier tamano, no ~400 a 4M).
+    Devuelve el nuevo `last_logged`."""
+    if batch_number == 1 or total - last_logged >= step:
+        log.info(
+            "wazuh_scroll_batch",
+            extra={"batch_number": batch_number, "running_total": total, "total": grand_total},
+        )
+        return total
+    return last_logged
+
+
+@with_retry
 def _scroll_start_sliced(
     session: requests.Session, indexer_url: str, slice_id: int, slice_max: int
 ) -> Tuple[Optional[str], List[Dict[str, Any]]]:
@@ -216,6 +252,8 @@ def _iter_vulns_batches_parallel(
     Correctitud: la union de las slices = el dataset completo sin duplicados (garantia de OpenSearch);
     el consumidor procesa cada batch igual que el path secuencial (mismo TRUNCATE+insert+upsert)."""
     channel = _ScrollChannel(maxsize=slices * 2)
+    grand_total = _safe_count(_build_session(wazuh_user, wazuh_password), indexer_url)
+    step = _progress_step(grand_total)
     threads = [
         threading.Thread(
             target=_slice_worker,
@@ -229,12 +267,13 @@ def _iter_vulns_batches_parallel(
         t.start()
     log.info(
         "wazuh_scroll_parallel_started",
-        extra={"indexer_url": indexer_url, "slices": slices, "batch_size": BATCH_SIZE},
+        extra={"indexer_url": indexer_url, "slices": slices, "batch_size": BATCH_SIZE, "total": grand_total},
     )
 
     total = 0
     batch_number = 0
     finished = 0
+    last_logged = 0
     try:
         while finished < slices:
             item = channel.q.get()
@@ -243,6 +282,7 @@ def _iter_vulns_batches_parallel(
                 continue
             batch_number += 1
             total += len(item)
+            last_logged = _log_scroll_progress(batch_number, total, grand_total, last_logged, step)
             yield item
     finally:
         _drain_and_join(channel, threads)
@@ -271,18 +311,18 @@ def iter_vulns_batches(
         return
 
     session = _build_session(wazuh_user, wazuh_password)
-    log.info("wazuh_scroll_started", extra={"indexer_url": indexer_url, "batch_size": BATCH_SIZE})
+    grand_total = _safe_count(session, indexer_url)
+    step = _progress_step(grand_total)
+    log.info("wazuh_scroll_started", extra={"indexer_url": indexer_url, "batch_size": BATCH_SIZE, "total": grand_total})
     scroll_id, hits = _scroll_start(session, indexer_url)
     batch_number = 0
     total = 0
+    last_logged = 0
     try:
         while hits:
             batch_number += 1
             total += len(hits)
-            log.info(
-                "wazuh_scroll_batch",
-                extra={"batch_number": batch_number, "batch_size": len(hits), "running_total": total},
-            )
+            last_logged = _log_scroll_progress(batch_number, total, grand_total, last_logged, step)
             yield [h["_source"] for h in hits]
             if not scroll_id:
                 break
