@@ -14,7 +14,7 @@ log = logging.getLogger(__name__)
 
 # Cada cuantos batches (de BATCH_SIZE=10k) se hace commit durante el sync. Evita una sola
 # transaccion gigante para los 4M (que acumularia millones de versiones de fila en WAL/memoria
-# y seria todo-o-nada). 10 batches = ~100k filas por transaccion.
+# y seria indivisible). 10 batches = ~100k filas por transaccion.
 SYNC_COMMIT_EVERY_N_BATCHES = 10
 
 def perform_sync_task(conn_id: int, username: str):
@@ -43,9 +43,9 @@ def perform_sync_task(conn_id: int, username: str):
             _mark_obsolete_sqlite(db, conn.id, db_sync_time)
         else:
             _prepare_pg_temp_table(db)
-            # Commit periodico (cada N batches) en vez de una unica transaccion para TODO el sync.
+            # Commit periodico (cada N batches) en vez de una unica transaccion para el sync entero.
             # A 4M, una sola transaccion acumula millones de versiones de fila en WAL/memoria y es
-            # todo-o-nada. Commitear por lote acota la transaccion, deja progreso durable y libera
+            # indivisible. Commitear por lote acota la transaccion, deja progreso durable y libera
             # a autovacuum. La temp table es ON COMMIT PRESERVE ROWS -> sobrevive los commits. Y
             # db_sync_time se capturo ANTES del loop, asi que _mark_obsolete_pg sigue correcto.
             for i, raw_vulns in enumerate(batches):

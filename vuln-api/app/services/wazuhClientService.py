@@ -157,40 +157,72 @@ def _put_blocking(q: "_queue.Queue", item: Any, stop: threading.Event) -> None:
             continue
 
 
+# Centinela que un worker pone en la cola para avisar que termino de recorrer su slice.
+_SLICE_DONE = object()
+
+
+class _ScrollChannel:
+    """Canal compartido entre los workers de slice y el consumidor: cola acotada de batches, senal
+    de parada y lista de errores. Agrupa el estado para no pasar tantos argumentos a cada worker."""
+
+    def __init__(self, maxsize: int):
+        self.q: "_queue.Queue" = _queue.Queue(maxsize=maxsize)
+        self.stop = threading.Event()
+        self.errors: List[BaseException] = []
+
+
+def _slice_worker(channel, indexer_url, wazuh_user, wazuh_password, slice_id, slice_max):
+    """Trae UNA slice del scroll y empuja sus batches al canal. Cualquier error se guarda para que
+    el generador lo re-lance; al terminar (ok o error) pone el centinela _SLICE_DONE en la cola."""
+    session = _build_session(wazuh_user, wazuh_password)
+    scroll_id = None
+    try:
+        scroll_id, hits = _scroll_start_sliced(session, indexer_url, slice_id, slice_max)
+        while hits and not channel.stop.is_set():
+            _put_blocking(channel.q, [h["_source"] for h in hits], channel.stop)
+            if channel.stop.is_set() or not scroll_id:
+                break
+            scroll_id, hits = _scroll_next(session, indexer_url, scroll_id)
+    except Exception as exc:  # NOSONAR - se guarda y el generador lo re-lanza tras drenar
+        channel.errors.append(exc)
+    finally:
+        if scroll_id:
+            _scroll_clear(session, indexer_url, scroll_id)
+        _put_blocking(channel.q, _SLICE_DONE, channel.stop)
+
+
+def _drain_and_join(channel: "_ScrollChannel", threads) -> None:
+    """Cierre seguro: avisa stop y drena la cola hasta que los workers mueran, para desbloquear los
+    q.put pendientes si el consumidor abandono (p.ej. error de BD). Evita cuelgues en el join."""
+    channel.stop.set()
+    while any(t.is_alive() for t in threads):
+        try:
+            while True:
+                channel.q.get_nowait()
+        except _queue.Empty:
+            pass
+        for t in threads:
+            t.join(timeout=0.1)
+
+
 def _iter_vulns_batches_parallel(
     indexer_url: str, wazuh_user: str, wazuh_password: str, slices: int
 ) -> Generator[List[Dict[str, Any]], None, None]:
-    """Scroll PARALELO con sliced scroll de OpenSearch. Lanza `slices` workers; cada uno scrollea
-    su slice (subconjunto disjunto de docs) y empuja batches a una cola ACOTADA. Este generador
-    -consumidor unico- los cede en el orden en que llegan. Beneficios: (1) el fetch de red -el
-    cuello del sync- se paraleliza K veces; (2) prefetch gratis: los workers van adelantados
+    """Scroll PARALELO con sliced scroll de OpenSearch. Lanza `slices` workers (_slice_worker); cada
+    uno trae su slice (subconjunto disjunto de docs) y empuja batches a una cola ACOTADA. Este
+    generador -consumidor unico- los cede en el orden en que llegan. Beneficios: (1) el fetch de red
+    -el cuello del sync- se paraleliza K veces; (2) prefetch gratis: los workers van adelantados
     mientras la BD procesa el batch anterior. La cola acotada da backpressure (no explota memoria).
-    Correctitud: union de slices = TODOS los docs sin duplicados (garantia de OpenSearch); el
-    consumidor procesa cada batch igual que el path secuencial (mismo TRUNCATE+insert+upsert)."""
-    q: "_queue.Queue" = _queue.Queue(maxsize=slices * 2)
-    _DONE = object()
-    stop = threading.Event()
-    errors: List[BaseException] = []
-
-    def worker(slice_id: int) -> None:
-        session = _build_session(wazuh_user, wazuh_password)
-        scroll_id = None
-        try:
-            scroll_id, hits = _scroll_start_sliced(session, indexer_url, slice_id, slices)
-            while hits and not stop.is_set():
-                _put_blocking(q, [h["_source"] for h in hits], stop)
-                if stop.is_set() or not scroll_id:
-                    break
-                scroll_id, hits = _scroll_next(session, indexer_url, scroll_id)
-        except Exception as exc:  # noqa: BLE001 - se propaga tras drenar (ver abajo)
-            errors.append(exc)
-        finally:
-            if scroll_id:
-                _scroll_clear(session, indexer_url, scroll_id)
-            _put_blocking(q, _DONE, stop)
-
+    Correctitud: la union de las slices = el dataset completo sin duplicados (garantia de OpenSearch);
+    el consumidor procesa cada batch igual que el path secuencial (mismo TRUNCATE+insert+upsert)."""
+    channel = _ScrollChannel(maxsize=slices * 2)
     threads = [
-        threading.Thread(target=worker, args=(i,), daemon=True, name=f"wazuh-slice-{i}")
+        threading.Thread(
+            target=_slice_worker,
+            args=(channel, indexer_url, wazuh_user, wazuh_password, i, slices),
+            daemon=True,
+            name=f"wazuh-slice-{i}",
+        )
         for i in range(slices)
     ]
     for t in threads:
@@ -200,44 +232,27 @@ def _iter_vulns_batches_parallel(
         extra={"indexer_url": indexer_url, "slices": slices, "batch_size": BATCH_SIZE},
     )
 
-    finished = 0
     total = 0
     batch_number = 0
+    finished = 0
     try:
         while finished < slices:
-            try:
-                item = q.get(timeout=1.0)
-            except _queue.Empty:
-                # Salvaguarda anti-cuelgue: si ningun worker sigue vivo, no esperamos mas _DONE.
-                if not any(t.is_alive() for t in threads):
-                    break
-                continue
-            if item is _DONE:
+            item = channel.q.get()
+            if item is _SLICE_DONE:
                 finished += 1
                 continue
             batch_number += 1
             total += len(item)
             yield item
     finally:
-        # Si el consumidor abandona (p.ej. error de BD en wazuhService), avisamos stop y drenamos
-        # la cola hasta que todos los workers mueran. Evita cuelgues en el join de threads daemon.
-        stop.set()
-        while any(t.is_alive() for t in threads):
-            try:
-                while True:
-                    q.get_nowait()
-            except _queue.Empty:
-                pass
-            for t in threads:
-                t.join(timeout=0.1)
+        _drain_and_join(channel, threads)
         log.info(
             "wazuh_scroll_parallel_finished",
             extra={"batches": batch_number, "total_hits": total, "slices": slices},
         )
 
-    if errors:
-        # Un slice que fallo = sync incompleto -> propagar (wazuhService hace rollback).
-        raise errors[0]
+    if channel.errors:
+        raise channel.errors[0]  # un slice que fallo = sync incompleto -> propagar (rollback en wazuhService)
 
 
 def iter_vulns_batches(
