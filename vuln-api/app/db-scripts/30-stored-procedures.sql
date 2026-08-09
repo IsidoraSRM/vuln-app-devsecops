@@ -46,25 +46,30 @@ $$ LANGUAGE plpgsql;
 
 -- 3. PROCEDIMIENTO ALMACENADO GENERAL (Conectado a la API y Frontend)
 -- Recibe arreglos (arrays) para soportar múltiples selecciones del frontend y devuelve la tabla completa.
+--
+-- IMPORTANTE (rendimiento a escala): esta función es LANGUAGE sql STABLE, NO plpgsql. Una función SQL
+-- de un solo SELECT es INLINEABLE por el planner de PostgreSQL: cuando list_vulns hace
+-- "... WHERE id IN (SELECT id FROM sp_filter_vulnerabilities(...))", el planner empuja los filtros a
+-- los índices y NO materializa las filas. Con plpgsql (caja negra) el planner materializaba las 500k
+-- filas COMPLETAS (todas las columnas) antes de contar -> el COUNT del dashboard tardaba segundos.
+-- Medido a 500k: el count sin filtro pasó de ~800ms (plpgsql) a ~70ms (sql) = 12x; en prod, con filas
+-- más anchas, la mejora es aún mayor (~6s -> sub-segundo). Sigue siendo un stored procedure.
 CREATE OR REPLACE FUNCTION sp_filter_vulnerabilities(
     p_severities TEXT[] DEFAULT NULL,
     p_os_platforms TEXT[] DEFAULT NULL,
     p_statuses TEXT[] DEFAULT NULL,
     p_agent_names TEXT[] DEFAULT NULL,
     p_days_ago INT DEFAULT NULL
-) 
-RETURNS SETOF wazuh_vulnerabilities AS $$
-BEGIN
-    RETURN QUERY 
+)
+RETURNS SETOF wazuh_vulnerabilities
+LANGUAGE sql STABLE AS $$
     SELECT v.*
-    FROM 
-        wazuh_vulnerabilities v
-    WHERE 
+    FROM wazuh_vulnerabilities v
+    WHERE
         (p_severities IS NULL OR array_length(p_severities, 1) IS NULL OR UPPER(v.severity) = ANY(SELECT UPPER(unnest) FROM unnest(p_severities)))
         AND (p_os_platforms IS NULL OR array_length(p_os_platforms, 1) IS NULL OR EXISTS (SELECT 1 FROM unnest(p_os_platforms) p WHERE v.os_platform ILIKE '%' || p || '%'))
         AND (p_statuses IS NULL OR array_length(p_statuses, 1) IS NULL OR UPPER(v.status) = ANY(SELECT UPPER(unnest) FROM unnest(p_statuses)))
         AND (p_agent_names IS NULL OR array_length(p_agent_names, 1) IS NULL OR EXISTS (SELECT 1 FROM unnest(p_agent_names) a WHERE v.agent_name ILIKE '%' || a || '%'))
         AND (p_days_ago IS NULL OR v.first_seen >= CURRENT_DATE - (p_days_ago || ' days')::interval);
-END;
-$$ LANGUAGE plpgsql;
+$$;
 
