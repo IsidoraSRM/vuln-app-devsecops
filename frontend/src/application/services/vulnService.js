@@ -48,6 +48,14 @@ export default {
             queryParams.sort_order = params.sort_order
         }
 
+        // Parámetros de paginación de columnas (cargas)
+        if (params.cargas_page !== undefined && params.cargas_page !== null) {
+            queryParams.cargas_page = params.cargas_page
+        }
+        if (params.cargas_limit !== undefined && params.cargas_limit !== null) {
+            queryParams.cargas_limit = params.cargas_limit
+        }
+
         return apiClient.get('/vulns', {
             params: queryParams,
         })

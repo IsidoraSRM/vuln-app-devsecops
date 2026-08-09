@@ -38,6 +38,8 @@ def list_vulns(
     detected_before: Optional[datetime] = Query(None),
     sort_key: Optional[str] = 'last_seen',
     sort_order: Optional[str] = 'desc',
+    cargas_page: int = 1,
+    cargas_limit: int = 10,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -191,22 +193,32 @@ def list_vulns(
     # Get unique connection IDs in the page's vulns
     conn_ids = set(v.connection_id for v in vulns)
     connection_syncs = {}
+    cargas_total = 0
     for cid in conn_ids:
+        # Get the total number of sync runs for this connection
+        total_runs_for_cid = db.execute(text("""
+            SELECT COUNT(DISTINCT timestamp) FROM sync_runs
+            WHERE connection_id = :conn_id
+        """), {"conn_id": cid}).scalar() or 0
+        if total_runs_for_cid > cargas_total:
+            cargas_total = total_runs_for_cid
+
         # Get the unique timestamps of the history events for vulnerabilities in this connection
-        # This represents the historical sync runs (cargas)
-        # Limit to the last 5 loads, sorted chronologically ASC
+        # This represents the historical sync runs (cargas) with pagination support
+        offset = (cargas_page - 1) * cargas_limit
         timestamps_res = db.execute(text("""
             SELECT DISTINCT timestamp FROM sync_runs
             WHERE connection_id = :conn_id
             ORDER BY timestamp DESC
-            LIMIT 5
-        """), {"conn_id": cid}).fetchall()
+            LIMIT :limit OFFSET :offset
+        """), {"conn_id": cid, "limit": cargas_limit, "offset": offset}).fetchall()
         parsed_ts = []
-        for r in timestamps_res:
+        for idx, r in enumerate(timestamps_res):
             dt = parse_dt(r[0])
             if dt:
-                parsed_ts.append(dt)
-        connection_syncs[cid] = sorted(parsed_ts)
+                global_rank = total_runs_for_cid - offset - idx
+                parsed_ts.append((dt, global_rank))
+        connection_syncs[cid] = sorted(parsed_ts, key=lambda x: x[0])
 
     items = []
     for v in vulns:
@@ -224,7 +236,7 @@ def list_vulns(
         # Calculate cargas status
         sync_ts = connection_syncs.get(v.connection_id, [])
         cargas = []
-        for i, t in enumerate(sync_ts):
+        for t, rank in sync_ts:
             past_events = []
             for h in hist_list:
                 h_ts = parse_dt(h["timestamp"])
@@ -240,7 +252,7 @@ def list_vulns(
                 else:
                     status = "white"
             cargas.append({
-                "label": f"Carga {i+1}",
+                "label": f"Carga {rank}",
                 "timestamp": t.isoformat(),
                 "status": status
             })
@@ -278,7 +290,10 @@ def list_vulns(
         "total": total_count,
         "page": page,
         "limit": limit if limit is not None else total_count,
-        "items": items
+        "items": items,
+        "cargas_total": cargas_total,
+        "cargas_page": cargas_page,
+        "cargas_limit": cargas_limit
     }
 
 @router.get("/filters")

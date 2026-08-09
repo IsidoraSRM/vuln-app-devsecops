@@ -179,6 +179,32 @@
     </div>
 
     <div v-show="!loading" class="card" style="padding: 0;">
+      <!-- Cargas Pagination Bar -->
+      <div v-if="cargasTotal > 0" class="cargas-pagination-bar">
+        <div class="cargas-pagination-info">
+          <span>Historial de Cargas: </span>
+          <strong>Cargas {{ cargasRangeText }}</strong>
+        </div>
+        <div class="cargas-pagination-nav">
+          <button 
+            class="btn-cargas-page" 
+            :disabled="!hasOlderCargas" 
+            @click="olderCargas"
+            title="Ver cargas más antiguas"
+          >
+            ◀ Cargas más antiguas
+          </button>
+          <button 
+            class="btn-cargas-page" 
+            :disabled="!hasNewerCargas" 
+            @click="newerCargas"
+            title="Ver cargas más recientes"
+          >
+            Cargas más recientes ▶
+          </button>
+        </div>
+      </div>
+
       <div class="table-wrapper">
         <div v-if="totalPages > 1" class="pagination-header">
           <span class="pagination-info">
@@ -325,6 +351,30 @@ const sortKey = ref('last_seen')
 const sortOrder = ref('desc')
 const showFilters = ref(true)
 
+// Column pagination state
+const cargasPage = ref(1)
+const cargasLimit = ref(10)
+const cargasTotal = ref(0)
+
+const hasOlderCargas = computed(() => cargasPage.value * cargasLimit.value < cargasTotal.value)
+const hasNewerCargas = computed(() => cargasPage.value > 1)
+const olderCargas = () => {
+  cargasPage.value++
+  fetchVulns()
+}
+const newerCargas = () => {
+  if (cargasPage.value > 1) {
+    cargasPage.value--
+    fetchVulns()
+  }
+}
+const cargasRangeText = computed(() => {
+  if (cargasTotal.value === 0) return '0 - 0 de 0'
+  const startRank = Math.max(1, cargasTotal.value - (cargasPage.value * cargasLimit.value) + 1)
+  const endRank = cargasTotal.value - ((cargasPage.value - 1) * cargasLimit.value)
+  return `${startRank} - ${endRank} de ${cargasTotal.value}`
+})
+
 const formatShortDate = (dateString) => {
   if (!dateString) return 'N/D'
   const d = new Date(dateString)
@@ -435,15 +485,19 @@ const fetchVulns = async () => {
       severity: selectedSeverities.value,
       score_min: scoreMin.value,
       score_max: scoreMax.value,
+      cargas_page: cargasPage.value,
+      cargas_limit: cargasLimit.value,
     }
 
     const res = await vulnService.getVulns(params)
     if (res.data && res.data.items) {
       vulns.value = res.data.items
       totalVulns.value = res.data.total
+      cargasTotal.value = res.data.cargas_total || 0
     } else {
       vulns.value = []
       totalVulns.value = 0
+      cargasTotal.value = 0
     }
     
     await fetchMetrics()
@@ -552,6 +606,7 @@ const onConnectionChange = () => {
   scoreMin.value = ''
   scoreMax.value = ''
   currentPage.value = 1
+  cargasPage.value = 1
   fetchFilterOptionsData()
   fetchVulns()
 }
@@ -565,6 +620,7 @@ const clearFilters = () => {
   scoreMin.value = ''
   scoreMax.value = ''
   currentPage.value = 1
+  cargasPage.value = 1
   fetchFilterOptionsData()
   fetchVulns()
 }
@@ -772,4 +828,101 @@ th { cursor: pointer; }
 .badge-low { background: rgba(59, 130, 246, 0.15); color: #3b82f6; }
 @media (max-width: 1400px) { .filter-row { grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); } }
 @media (max-width: 1100px) { .filter-row { grid-template-columns: 1fr 1fr; } .f-group { border-right: none; border-bottom: 1px solid var(--border); } }
+
+/* Cargas Pagination Styles */
+.cargas-pagination-bar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0.75rem 1.5rem;
+  background-color: var(--bg-dark);
+  border-bottom: 1px solid var(--border);
+  border-top-left-radius: var(--radius-md);
+  border-top-right-radius: var(--radius-md);
+  font-size: 0.85rem;
+  color: var(--text-muted);
+}
+.cargas-pagination-info strong {
+  color: var(--primary);
+}
+.cargas-pagination-nav {
+  display: flex;
+  gap: 0.5rem;
+}
+.btn-cargas-page {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.4rem 0.75rem;
+  background-color: var(--bg-panel);
+  border: 1px solid var(--border);
+  color: var(--text-main);
+  border-radius: 6px;
+  font-size: 0.8rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+.btn-cargas-page:hover:not(:disabled) {
+  background-color: var(--bg-hover);
+  border-color: var(--primary);
+  color: var(--primary);
+}
+.btn-cargas-page:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+/* Sticky columns for the table */
+.vuln-table {
+  border-collapse: separate;
+  border-spacing: 0;
+}
+
+.vuln-table th:first-child,
+.vuln-table td:first-child {
+  position: sticky;
+  left: 0;
+  background-color: var(--bg-card) !important;
+  z-index: 5;
+  border-right: 1px solid var(--border);
+}
+
+.vuln-table th:first-child {
+  background-color: var(--bg-panel) !important;
+  z-index: 6;
+}
+
+.vuln-table th:nth-child(2),
+.vuln-table td:nth-child(2) {
+  position: sticky;
+  left: 110px;
+  background-color: var(--bg-card) !important;
+  z-index: 5;
+  border-right: 1px solid var(--border);
+}
+
+.vuln-table th:nth-child(2) {
+  background-color: var(--bg-panel) !important;
+  z-index: 6;
+}
+
+.vuln-table th:first-child,
+.vuln-table td:first-child {
+  width: 110px !important;
+  min-width: 110px !important;
+  max-width: 110px !important;
+}
+
+.vuln-table th:nth-child(2),
+.vuln-table td:nth-child(2) {
+  width: 200px !important;
+  min-width: 200px !important;
+  max-width: 200px !important;
+}
+
+.vuln-table th:not(:first-child):not(:nth-child(2)),
+.vuln-table td:not(:first-child):not(:nth-child(2)) {
+  min-width: 130px;
+  text-align: center;
+}
 </style>
