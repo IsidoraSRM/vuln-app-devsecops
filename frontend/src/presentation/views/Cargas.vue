@@ -195,15 +195,6 @@
       <p>Cargando evolución de cargas...</p>
     </div>
 
-    <!-- Trend Chart Panel -->
-    <div class="card trend-panel" v-if="!loading && metricsSummary.total > 0">
-      <div class="chart-container">
-        <h3>Evolución de Vulnerabilidades Activas (Tendencia por Carga)</h3>
-        <div class="canvas-wrapper">
-          <canvas id="areaChart"></canvas>
-        </div>
-      </div>
-    </div>
 
     <div v-show="!loading" class="card" style="padding: 0;">
       <!-- Cargas Pagination Bar -->
@@ -471,10 +462,9 @@ const metricsSummary = ref({ total: 0, critical: 0, high: 0, medium: 0, low: 0 }
 
 // Visualizations Logic
 let donutChartInstance = null
-let areaChartInstance = null
 
 const renderCharts = () => {
-  // 1. Donut Chart
+  // Donut Chart
   const donutCtx = document.getElementById('donutChart')?.getContext('2d')
   if (donutCtx) {
     if (donutChartInstance) donutChartInstance.destroy()
@@ -521,110 +511,21 @@ const renderCharts = () => {
       }
     })
   }
-
-  // 2. Stacked Area Chart
-  const areaCtx = document.getElementById('areaChart')?.getContext('2d')
-  if (areaCtx) {
-    if (areaChartInstance) areaChartInstance.destroy()
-
-    const labels = cargasHeaders.value.map(h => h.label)
-    
-    const criticalData = new Array(labels.length).fill(0)
-    const highData = new Array(labels.length).fill(0)
-    const mediumData = new Array(labels.length).fill(0)
-    const lowData = new Array(labels.length).fill(0)
-
-    vulns.value.forEach(vuln => {
-      const sev = (vuln.severity || 'LOW').toUpperCase()
-      cargasHeaders.value.forEach((header, idx) => {
-        if (vuln.cargas[header.index] && vuln.cargas[header.index].status === 'red') {
-          if (sev === 'CRITICAL' || sev === 'CRITICA') {
-            criticalData[idx]++
-          } else if (sev === 'HIGH' || sev === 'ALTA') {
-            highData[idx]++
-          } else if (sev === 'MEDIUM' || sev === 'MEDIA') {
-            mediumData[idx]++
-          } else {
-            lowData[idx]++
-          }
-        }
-      })
-    })
-
-    areaChartInstance = new Chart(areaCtx, {
-      type: 'line',
-      data: {
-        labels: labels,
-        datasets: [
-          {
-            label: 'Críticas',
-            data: criticalData,
-            borderColor: '#ef4444',
-            backgroundColor: 'rgba(239, 68, 68, 0.15)',
-            fill: true,
-            tension: 0.3
-          },
-          {
-            label: 'Altas',
-            data: highData,
-            borderColor: '#f97316',
-            backgroundColor: 'rgba(249, 115, 22, 0.15)',
-            fill: true,
-            tension: 0.3
-          },
-          {
-            label: 'Medias',
-            data: mediumData,
-            borderColor: '#eab308',
-            backgroundColor: 'rgba(234, 179, 8, 0.15)',
-            fill: true,
-            tension: 0.3
-          },
-          {
-            label: 'Bajas/Otras',
-            data: lowData,
-            borderColor: '#3b82f6',
-            backgroundColor: 'rgba(59, 130, 246, 0.15)',
-            fill: true,
-            tension: 0.3
-          }
-        ]
-      },
-      options: {
-        responsive: true,
-        maintainAspectRatio: false,
-        scales: {
-          x: {
-            stacked: true,
-            grid: { color: 'rgba(255, 255, 255, 0.05)' },
-            ticks: { color: '#9ca3af', font: { family: 'Inter, sans-serif' } }
-          },
-          y: {
-            stacked: true,
-            grid: { color: 'rgba(255, 255, 255, 0.05)' },
-            ticks: { color: '#9ca3af', font: { family: 'Inter, sans-serif' } }
-          }
-        },
-        plugins: {
-          legend: {
-            position: 'top',
-            labels: { color: '#d1d5db', font: { family: 'Inter, sans-serif' } }
-          }
-        }
-      }
-    })
-  }
 }
 
-watch([vulns, metricsSummary, cargasHeaders], () => {
+watch([vulns, metricsSummary, loading], () => {
   nextTick(() => {
-    renderCharts()
+    if (!loading.value) {
+      renderCharts()
+    }
   })
 }, { deep: true })
 
 onMounted(() => {
   nextTick(() => {
-    renderCharts()
+    if (!loading.value) {
+      renderCharts()
+    }
   })
 })
 
@@ -1180,14 +1081,6 @@ th { cursor: pointer; }
   }
 }
 
-/* Trend evolution chart below */
-.trend-panel {
-  margin-bottom: 2rem;
-  padding: 1.5rem;
-  background-color: var(--bg-panel);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-md);
-}
 .chart-container {
   background-color: var(--bg-dark);
   border: 1px solid var(--border);
