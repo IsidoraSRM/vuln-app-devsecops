@@ -19,63 +19,58 @@
       {{ error }}
     </div>
 
-    <!-- Tarjetas de Métricas -->
-    <div class="metrics-grid">
-      <div class="metric-card total" @click="filterBySeverity(null)">
-        <div class="metric-icon">
-          <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path><line x1="12" y1="9" x2="12" y2="13"></line><line x1="12" y1="17" x2="12.01" y2="17"></line></svg>
-        </div>
-        <div class="metric-details">
-          <div class="metric-val">{{ metricsSummary.total }}</div>
-          <div class="metric-lbl">Vulnerabilidades Totales</div>
+    <!-- Dashboard Hero Panel -->
+    <div class="card dashboard-hero" v-if="!loading && metricsSummary.total > 0">
+      <!-- Left: Pie/Donut Chart Container -->
+      <div class="hero-chart-container">
+        <h3>Distribución por Severidad</h3>
+        <div class="canvas-wrapper">
+          <canvas id="donutChart"></canvas>
         </div>
       </div>
-      <div class="metric-card critical" @click="filterBySeverity(['CRITICAL', 'CRITICA'])">
-        <div class="metric-icon">
-          <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="8" x2="12" y2="12"></line><line x1="12" y1="16" x2="12.01" y2="16"></line></svg>
-        </div>
-        <div class="metric-details">
-          <div class="metric-val">{{ metricsSummary.critical }}</div>
-          <div class="metric-lbl">Críticas (CVEs Únicos)</div>
-        </div>
-      </div>
-      <div class="metric-card high" @click="filterBySeverity(['HIGH', 'ALTA'])">
-        <div class="metric-icon">
-          <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 7 13.5 15.5 8.5 10.5 2 17"></polyline><polyline points="16 7 22 7 22 13"></polyline></svg>
-        </div>
-        <div class="metric-details">
-          <div class="metric-val">{{ metricsSummary.high }}</div>
-          <div class="metric-lbl">Altas (CVEs Únicos)</div>
-        </div>
-      </div>
-      <div class="metric-card medium-low" @click="filterBySeverity(['MEDIUM', 'MEDIA', 'LOW', 'BAJA'])">
-        <div class="metric-icon">
-          <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a10 10 0 0 0-10 10v1a10 10 0 0 0 10 10h1a10 10 0 0 0 10-10V12a10 10 0 0 0-10-10z"></path></svg>
-        </div>
-        <div class="metric-details">
-          <div class="metric-val">{{ metricsSummary.medium + metricsSummary.low }}</div>
-          <div class="metric-lbl">Medias y Bajas</div>
-        </div>
-      </div>
-    </div>
-
-    <!-- Collapsible Charts Panel -->
-    <div class="card charts-panel" v-if="!loading && metricsSummary.total > 0">
-      <div class="charts-header" @click="showCharts = !showCharts">
-        <span class="charts-title">📊 Visualizaciones y Gráficos Estadísticos</span>
-        <span class="charts-toggle">{{ showCharts ? '▲ Ocultar Gráficos' : '▼ Mostrar Gráficos' }}</span>
-      </div>
-      <div v-show="showCharts" class="charts-grid fade-in">
-        <div class="chart-container">
-          <h3>Distribución por Severidad (%)</h3>
-          <div class="canvas-wrapper">
-            <canvas id="donutChart"></canvas>
+      
+      <!-- Right: Metrics Container -->
+      <div class="hero-metrics-container">
+        <h2 class="hero-title">Evolución por cargas</h2>
+        <div class="metrics-2x2-grid">
+          <div class="metric-card total" @click="filterBySeverity(null)" style="margin: 0; cursor: pointer;">
+            <div class="metric-icon">
+              <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path><line x1="12" y1="9" x2="12" y2="13"></line><line x1="12" y1="17" x2="12.01" y2="17"></line></svg>
+            </div>
+            <div class="metric-details">
+              <div class="metric-val">{{ metricsSummary.total }}</div>
+              <div class="metric-lbl">Vulnerabilidades Totales</div>
+            </div>
           </div>
-        </div>
-        <div class="chart-container">
-          <h3>Evolución de Vulnerabilidades Activas</h3>
-          <div class="canvas-wrapper">
-            <canvas id="areaChart"></canvas>
+          
+          <div class="metric-card critical" @click="filterBySeverity(['CRITICAL', 'CRITICA'])" style="margin: 0; cursor: pointer;">
+            <div class="metric-icon">
+              <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="8" x2="12" y2="12"></line><line x1="12" y1="16" x2="12.01" y2="16"></line></svg>
+            </div>
+            <div class="metric-details">
+              <div class="metric-val">{{ metricsSummary.critical }}</div>
+              <div class="metric-lbl">Críticas (CVEs Únicos)</div>
+            </div>
+          </div>
+          
+          <div class="metric-card high" @click="filterBySeverity(['HIGH', 'ALTA'])" style="margin: 0; cursor: pointer;">
+            <div class="metric-icon">
+              <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 7 13.5 15.5 8.5 10.5 2 17"></polyline><polyline points="16 7 22 7 22 13"></polyline></svg>
+            </div>
+            <div class="metric-details">
+              <div class="metric-val">{{ metricsSummary.high }}</div>
+              <div class="metric-lbl">Altas (CVEs Únicos)</div>
+            </div>
+          </div>
+          
+          <div class="metric-card medium-low" @click="filterBySeverity(['MEDIUM', 'MEDIA', 'LOW', 'BAJA'])" style="margin: 0; cursor: pointer;">
+            <div class="metric-icon">
+              <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a10 10 0 0 0-10 10v1a10 10 0 0 0 10 10h1a10 10 0 0 0 10-10V12a10 10 0 0 0-10-10z"></path></svg>
+            </div>
+            <div class="metric-details">
+              <div class="metric-val">{{ metricsSummary.medium + metricsSummary.low }}</div>
+              <div class="metric-lbl">Medias y Bajas</div>
+            </div>
           </div>
         </div>
       </div>
@@ -198,6 +193,16 @@
         <svg class="spin" xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="var(--primary)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="2" x2="12" y2="6"></line><line x1="12" y1="18" x2="12" y2="22"></line><line x1="4.93" y1="4.93" x2="7.76" y2="7.76"></line><line x1="16.24" y1="16.24" x2="19.07" y2="19.07"></line><line x1="2" y1="12" x2="6" y2="12"></line><line x1="18" y1="12" x2="22" y2="12"></line><line x1="4.93" y1="19.07" x2="7.76" y2="16.24"></line><line x1="16.24" y1="7.76" x2="19.07" y2="4.93"></line></svg>
       </div>
       <p>Cargando evolución de cargas...</p>
+    </div>
+
+    <!-- Trend Chart Panel -->
+    <div class="card trend-panel" v-if="!loading && metricsSummary.total > 0">
+      <div class="chart-container">
+        <h3>Evolución de Vulnerabilidades Activas (Tendencia por Carga)</h3>
+        <div class="canvas-wrapper">
+          <canvas id="areaChart"></canvas>
+        </div>
+      </div>
     </div>
 
     <div v-show="!loading" class="card" style="padding: 0;">
@@ -465,7 +470,6 @@ const scoreMax = ref('')
 const metricsSummary = ref({ total: 0, critical: 0, high: 0, medium: 0, low: 0 })
 
 // Visualizations Logic
-const showCharts = ref(false)
 let donutChartInstance = null
 let areaChartInstance = null
 
@@ -614,16 +618,14 @@ const renderCharts = () => {
 
 watch([vulns, metricsSummary, cargasHeaders], () => {
   nextTick(() => {
-    if (showCharts.value) {
-      renderCharts()
-    }
+    renderCharts()
   })
 }, { deep: true })
 
-watch(showCharts, (val) => {
-  if (val) {
-    nextTick(renderCharts)
-  }
+onMounted(() => {
+  nextTick(() => {
+    renderCharts()
+  })
 })
 
 const search = reactive({ agent: '', vuln: '', package: '' })
@@ -1119,41 +1121,72 @@ th { cursor: pointer; }
   text-align: center;
 }
 
-/* Charts styles */
-.charts-panel {
+/* Dashboard layout hero card */
+.dashboard-hero {
+  display: grid;
+  grid-template-columns: 1fr 1.6fr;
+  gap: 2rem;
+  margin-bottom: 2rem;
+  background-color: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: 1.5rem;
+}
+@media (max-width: 1024px) {
+  .dashboard-hero {
+    grid-template-columns: 1fr;
+  }
+}
+.hero-chart-container {
+  background-color: var(--bg-dark);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 1.5rem;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+}
+.hero-chart-container h3 {
+  font-size: 0.9rem;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  margin-bottom: 1.25rem;
+  letter-spacing: 0.05em;
+  font-weight: 600;
+  text-align: center;
+}
+.hero-metrics-container {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 1rem;
+}
+.hero-title {
+  font-size: 1.5rem;
+  font-weight: 700;
+  color: var(--text-main);
+  margin-bottom: 0.5rem;
+  border-left: 4px solid var(--primary);
+  padding-left: 0.75rem;
+}
+.metrics-2x2-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1rem;
+}
+@media (max-width: 520px) {
+  .metrics-2x2-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* Trend evolution chart below */
+.trend-panel {
   margin-bottom: 2rem;
   padding: 1.5rem;
   background-color: var(--bg-panel);
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
-}
-.charts-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  cursor: pointer;
-  user-select: none;
-}
-.charts-title {
-  font-size: 1.1rem;
-  font-weight: 600;
-  color: var(--text-main);
-}
-.charts-toggle {
-  font-size: 0.85rem;
-  color: var(--primary);
-  font-weight: 500;
-}
-.charts-grid {
-  display: grid;
-  grid-template-columns: 1fr 2fr;
-  gap: 2rem;
-  margin-top: 1.5rem;
-}
-@media (max-width: 900px) {
-  .charts-grid {
-    grid-template-columns: 1fr;
-  }
 }
 .chart-container {
   background-color: var(--bg-dark);
