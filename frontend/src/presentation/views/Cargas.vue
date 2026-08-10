@@ -59,6 +59,28 @@
       </div>
     </div>
 
+    <!-- Collapsible Charts Panel -->
+    <div class="card charts-panel" v-if="!loading && metricsSummary.total > 0">
+      <div class="charts-header" @click="showCharts = !showCharts">
+        <span class="charts-title">📊 Visualizaciones y Gráficos Estadísticos</span>
+        <span class="charts-toggle">{{ showCharts ? '▲ Ocultar Gráficos' : '▼ Mostrar Gráficos' }}</span>
+      </div>
+      <div v-show="showCharts" class="charts-grid fade-in">
+        <div class="chart-container">
+          <h3>Distribución por Severidad (%)</h3>
+          <div class="canvas-wrapper">
+            <canvas id="donutChart"></canvas>
+          </div>
+        </div>
+        <div class="chart-container">
+          <h3>Evolución de Vulnerabilidades Activas</h3>
+          <div class="canvas-wrapper">
+            <canvas id="areaChart"></canvas>
+          </div>
+        </div>
+      </div>
+    </div>
+
     <div v-if="!loading" class="filter-toggle-bar">
       <button class="btn-clear-filters" @click="clearFilters">
         <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -345,9 +367,12 @@
 </template>
 
 <script setup>
-import { ref, onMounted, computed, watch, reactive } from 'vue'
+import { ref, onMounted, computed, watch, reactive, nextTick } from 'vue'
 import vulnService from '../../application/services/vulnService'
 import wazuhService from '../../application/services/wazuhService'
+import { Chart, registerables } from 'chart.js'
+
+Chart.register(...registerables)
 
 const vulns = ref([])
 const totalVulns = ref(0)
@@ -438,6 +463,168 @@ const scoreMin = ref('')
 const scoreMax = ref('')
 
 const metricsSummary = ref({ total: 0, critical: 0, high: 0, medium: 0, low: 0 })
+
+// Visualizations Logic
+const showCharts = ref(false)
+let donutChartInstance = null
+let areaChartInstance = null
+
+const renderCharts = () => {
+  // 1. Donut Chart
+  const donutCtx = document.getElementById('donutChart')?.getContext('2d')
+  if (donutCtx) {
+    if (donutChartInstance) donutChartInstance.destroy()
+    
+    const total = metricsSummary.value.total || 1
+    const criticalPercent = ((metricsSummary.value.critical / total) * 100).toFixed(1)
+    const highPercent = ((metricsSummary.value.high / total) * 100).toFixed(1)
+    const mediumPercent = ((metricsSummary.value.medium / total) * 100).toFixed(1)
+    const lowPercent = ((metricsSummary.value.low / total) * 100).toFixed(1)
+
+    donutChartInstance = new Chart(donutCtx, {
+      type: 'doughnut',
+      data: {
+        labels: [
+          `Críticas (${metricsSummary.value.critical} - ${criticalPercent}%)`,
+          `Altas (${metricsSummary.value.high} - ${highPercent}%)`,
+          `Medias (${metricsSummary.value.medium} - ${mediumPercent}%)`,
+          `Bajas/Otras (${metricsSummary.value.low} - ${lowPercent}%)`
+        ],
+        datasets: [{
+          data: [
+            metricsSummary.value.critical,
+            metricsSummary.value.high,
+            metricsSummary.value.medium,
+            metricsSummary.value.low
+          ],
+          backgroundColor: ['#ef4444', '#f97316', '#eab308', '#3b82f6'],
+          borderWidth: 1,
+          borderColor: 'rgba(255, 255, 255, 0.1)'
+        }]
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: {
+          legend: {
+            position: 'right',
+            labels: {
+              color: '#d1d5db',
+              font: { size: 11, family: 'Inter, sans-serif' }
+            }
+          }
+        }
+      }
+    })
+  }
+
+  // 2. Stacked Area Chart
+  const areaCtx = document.getElementById('areaChart')?.getContext('2d')
+  if (areaCtx) {
+    if (areaChartInstance) areaChartInstance.destroy()
+
+    const labels = cargasHeaders.value.map(h => h.label)
+    
+    const criticalData = new Array(labels.length).fill(0)
+    const highData = new Array(labels.length).fill(0)
+    const mediumData = new Array(labels.length).fill(0)
+    const lowData = new Array(labels.length).fill(0)
+
+    vulns.value.forEach(vuln => {
+      const sev = (vuln.severity || 'LOW').toUpperCase()
+      cargasHeaders.value.forEach((header, idx) => {
+        if (vuln.cargas[header.index] && vuln.cargas[header.index].status === 'red') {
+          if (sev === 'CRITICAL' || sev === 'CRITICA') {
+            criticalData[idx]++
+          } else if (sev === 'HIGH' || sev === 'ALTA') {
+            highData[idx]++
+          } else if (sev === 'MEDIUM' || sev === 'MEDIA') {
+            mediumData[idx]++
+          } else {
+            lowData[idx]++
+          }
+        }
+      })
+    })
+
+    areaChartInstance = new Chart(areaCtx, {
+      type: 'line',
+      data: {
+        labels: labels,
+        datasets: [
+          {
+            label: 'Críticas',
+            data: criticalData,
+            borderColor: '#ef4444',
+            backgroundColor: 'rgba(239, 68, 68, 0.15)',
+            fill: true,
+            tension: 0.3
+          },
+          {
+            label: 'Altas',
+            data: highData,
+            borderColor: '#f97316',
+            backgroundColor: 'rgba(249, 115, 22, 0.15)',
+            fill: true,
+            tension: 0.3
+          },
+          {
+            label: 'Medias',
+            data: mediumData,
+            borderColor: '#eab308',
+            backgroundColor: 'rgba(234, 179, 8, 0.15)',
+            fill: true,
+            tension: 0.3
+          },
+          {
+            label: 'Bajas/Otras',
+            data: lowData,
+            borderColor: '#3b82f6',
+            backgroundColor: 'rgba(59, 130, 246, 0.15)',
+            fill: true,
+            tension: 0.3
+          }
+        ]
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        scales: {
+          x: {
+            stacked: true,
+            grid: { color: 'rgba(255, 255, 255, 0.05)' },
+            ticks: { color: '#9ca3af', font: { family: 'Inter, sans-serif' } }
+          },
+          y: {
+            stacked: true,
+            grid: { color: 'rgba(255, 255, 255, 0.05)' },
+            ticks: { color: '#9ca3af', font: { family: 'Inter, sans-serif' } }
+          }
+        },
+        plugins: {
+          legend: {
+            position: 'top',
+            labels: { color: '#d1d5db', font: { family: 'Inter, sans-serif' } }
+          }
+        }
+      }
+    })
+  }
+}
+
+watch([vulns, metricsSummary, cargasHeaders], () => {
+  nextTick(() => {
+    if (showCharts.value) {
+      renderCharts()
+    }
+  })
+}, { deep: true })
+
+watch(showCharts, (val) => {
+  if (val) {
+    nextTick(renderCharts)
+  }
+})
 
 const search = reactive({ agent: '', vuln: '', package: '' })
 const dropdowns = reactive({ agents: false, vulns: false, packages: false, severity: false })
@@ -930,5 +1117,60 @@ th { cursor: pointer; }
 .vuln-table td:not(:first-child):not(:nth-child(2)) {
   min-width: 130px;
   text-align: center;
+}
+
+/* Charts styles */
+.charts-panel {
+  margin-bottom: 2rem;
+  padding: 1.5rem;
+  background-color: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+}
+.charts-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  cursor: pointer;
+  user-select: none;
+}
+.charts-title {
+  font-size: 1.1rem;
+  font-weight: 600;
+  color: var(--text-main);
+}
+.charts-toggle {
+  font-size: 0.85rem;
+  color: var(--primary);
+  font-weight: 500;
+}
+.charts-grid {
+  display: grid;
+  grid-template-columns: 1fr 2fr;
+  gap: 2rem;
+  margin-top: 1.5rem;
+}
+@media (max-width: 900px) {
+  .charts-grid {
+    grid-template-columns: 1fr;
+  }
+}
+.chart-container {
+  background-color: var(--bg-dark);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 1.5rem;
+}
+.chart-container h3 {
+  font-size: 0.9rem;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  margin-bottom: 1.25rem;
+  letter-spacing: 0.05em;
+  font-weight: 600;
+}
+.canvas-wrapper {
+  height: 250px;
+  position: relative;
 }
 </style>
