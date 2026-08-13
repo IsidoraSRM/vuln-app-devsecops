@@ -9,6 +9,7 @@ import Logs from '../views/Logs.vue'
 import Metrics from '../views/Metrics.vue'
 import NotFound from '../views/NotFound.vue'
 import Cargas from '../views/Cargas.vue'
+import DwellTime from '../views/DwellTime.vue'
 import userService from '../../application/services/userService'
 
 
@@ -18,6 +19,7 @@ const routes = [
   { path: '/dashboard', name: 'Dashboard', component: Dashboard, meta: { requiresAuth: true } },
   { path: '/cargas', name: 'Cargas', component: Cargas, meta: { requiresAuth: true } },
   { path: '/timeline', name: 'Timeline', component: Timeline, meta: { requiresAuth: true } },
+  { path: '/dwell-time', name: 'DwellTime', component: DwellTime, meta: { requiresAuth: true } },
   { path: '/config-user', name: 'ConfigUser', component: ConfigUser, meta: { requiresAuth: true } },
   { path: '/config-wazuh', name: 'ConfigWazuh', component: ConfigWazuh, meta: { requiresAuth: true } },
   { path: '/logs', name: 'Logs', component: Logs, meta: { requiresAuth: true } },

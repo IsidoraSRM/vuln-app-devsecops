@@ -80,6 +80,14 @@ export default {
         return apiClient.get('/vulns/metrics/summary', { params })
     },
 
+    getDwellTime: async (connectionId = null) => {
+        const params = {}
+        if (connectionId !== null && connectionId !== undefined && connectionId !== '') {
+            params.connection_id = connectionId
+        }
+        return apiClient.get('/vulns/metrics/dwell-time', { params })
+    },
+
     syncVulns: async () => {
         return apiClient.post('/vulns/sync-all')
     },

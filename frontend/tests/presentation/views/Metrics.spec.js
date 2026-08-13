@@ -13,12 +13,13 @@ describe('Metrics.vue', () => {
     })
 
     it('carga y muestra las métricas al montar, con promedio de sync calculado', async () => {
+        // El backend expone sync_duration_ms (milisegundos); la UI lo muestra en segundos.
         apiClient.get.mockResolvedValue({
             data: {
                 vulnerabilities_detected_total: 42,
                 login_attempts_total: 10,
-                sync_duration_seconds_count: 2,
-                sync_duration_seconds_sum: 10,
+                sync_duration_ms_count: 2,
+                sync_duration_ms_sum: 10000,
             }
         })
 
@@ -27,19 +28,19 @@ describe('Metrics.vue', () => {
 
         expect(apiClient.get).toHaveBeenCalledWith('/metrics-summary')
         expect(wrapper.text()).toContain('42')
-        // mean = 10 / 2 = 5.000
+        // mean = 10000 ms / 2 / 1000 = 5.000 s
         expect(wrapper.text()).toContain('5.000')
     })
 
     it('sin syncs el promedio queda vacío (no divide por cero)', async () => {
         apiClient.get.mockResolvedValue({
-            data: { sync_duration_seconds_count: 0, sync_duration_seconds_sum: 0 }
+            data: { sync_duration_ms_count: 0, sync_duration_ms_sum: 0 }
         })
 
         const wrapper = mount(Metrics)
         await flushPromises()
 
-        expect(wrapper.text()).toContain('Sync mean')
+        expect(wrapper.text()).toContain('Sync promedio')
     })
 
     it('el botón Actualizar vuelve a pedir métricas y tolera errores', async () => {

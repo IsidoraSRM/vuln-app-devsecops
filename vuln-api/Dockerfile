@@ -11,11 +11,10 @@ COPY . .
 
 ENV UVICORN_HOST=0.0.0.0
 ENV UVICORN_PORT=8000
-ENV UVICORN_WORKERS=4
 
 EXPOSE 8000
 
-# Varios workers (procesos separados) => sin GIL compartido: las llamadas del dashboard
-# (/filters, /vulns, /summary) se atienden en PARALELO en vez de serializarse detras de la mas
-# pesada. Ajustable via UVICORN_WORKERS segun las vCPUs de la VM.
-CMD ["sh", "-c", "uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers ${UVICORN_WORKERS}"]
+# Un solo proceso a proposito: el buffer de logs en memoria (vista /logs) y el setup de las MV al
+# arranque son por-proceso; con varios workers /logs se vuelve inconsistente y el setup choca. El
+# rendimiento del dashboard lo sostiene el cap de /filters (no hacia falta paralelismo de procesos).
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
