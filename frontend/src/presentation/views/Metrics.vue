@@ -57,7 +57,7 @@
     </section>
 
     <div class="actions">
-      <button class="btn" @click="refresh">Actualizar</button>
+      <button type="button" class="btn" @click="refresh">Actualizar</button>
       <label class="chk"><input type="checkbox" v-model="autoRefresh" /> Auto-refresh</label>
       <label class="chk">cada <input type="number" v-model.number="intervalSec" min="1" style="width:4rem" /> s</label>
       <a :href="metricsUrl" target="_blank" rel="noopener" class="btn ghost">Ver raw /metrics</a>

@@ -6,7 +6,7 @@
         <p class="subtitle">Monitorea el ciclo de vida de vulnerabilidades y su remediación a través de las sincronizaciones.</p>
       </div>
       <div>
-        <button class="btn btn-primary" @click="syncVulns" :disabled="syncing">
+        <button type="button" class="btn btn-primary" @click="syncVulns" :disabled="syncing">
           <svg v-if="syncing" class="spin" xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="2" x2="12" y2="6"></line><line x1="12" y1="18" x2="12" y2="22"></line><line x1="4.93" y1="4.93" x2="7.76" y2="7.76"></line><line x1="16.24" y1="16.24" x2="19.07" y2="19.07"></line><line x1="2" y1="12" x2="6" y2="12"></line><line x1="18" y1="12" x2="22" y2="12"></line><line x1="4.93" y1="19.07" x2="7.76" y2="16.24"></line><line x1="16.24" y1="7.76" x2="19.07" y2="4.93"></line></svg>
           <svg v-else xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.59-9.5l1.75 1.93"></path></svg>
           {{ syncing ? 'Sincronizando...' : 'Sincronizar' }}
@@ -77,7 +77,7 @@
     </div>
 
     <div v-if="!loading" class="filter-toggle-bar">
-      <button class="btn-clear-filters" @click="clearFilters">
+      <button type="button" class="btn-clear-filters" @click="clearFilters">
         <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
           <path d="M3 6h18"></path>
           <path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"></path>
@@ -99,7 +99,7 @@
 
         <div class="f-group popover-wrap" v-click-outside="() => (dropdowns.agents = false)">
           <label>Agentes</label>
-          <button class="filter-input dd-btn" @click="dropdowns.agents = !dropdowns.agents" :disabled="!agentOptions.length">
+          <button type="button" class="filter-input dd-btn" @click="dropdowns.agents = !dropdowns.agents" :disabled="!agentOptions.length">
             <span>{{ selectedAgents.length ? selectedAgents.length + ' sel.' : 'Todos' }}</span>
             <span>▼</span>
           </button>
@@ -119,7 +119,7 @@
 
         <div class="f-group popover-wrap" v-click-outside="() => (dropdowns.vulns = false)">
           <label>CVE ID</label>
-          <button class="filter-input dd-btn" @click="dropdowns.vulns = !dropdowns.vulns" :disabled="!vulnOptions.length">
+          <button type="button" class="filter-input dd-btn" @click="dropdowns.vulns = !dropdowns.vulns" :disabled="!vulnOptions.length">
             <span>{{ selectedVulns.length ? selectedVulns.length + ' sel.' : 'Todas' }}</span>
             <span>▼</span>
           </button>
@@ -139,7 +139,7 @@
 
         <div class="f-group popover-wrap" v-click-outside="() => (dropdowns.packages = false)">
           <label>Software Afectado</label>
-          <button class="filter-input dd-btn" @click="dropdowns.packages = !dropdowns.packages" :disabled="!packageOptions.length">
+          <button type="button" class="filter-input dd-btn" @click="dropdowns.packages = !dropdowns.packages" :disabled="!packageOptions.length">
             <span>{{ selectedPackages.length ? selectedPackages.length + ' sel.' : 'Todos' }}</span>
             <span>▼</span>
           </button>
@@ -159,7 +159,7 @@
 
         <div class="f-group popover-wrap" v-click-outside="() => (dropdowns.severity = false)">
           <label>Severidad</label>
-          <button class="filter-input dd-btn" @click="dropdowns.severity = !dropdowns.severity" :disabled="!severityOptions.length">
+          <button type="button" class="filter-input dd-btn" @click="dropdowns.severity = !dropdowns.severity" :disabled="!severityOptions.length">
             <span>{{ selectedSeverities.length ? selectedSeverities.length + ' sel.' : 'Todas' }}</span>
             <span>▼</span>
           </button>
@@ -205,14 +205,16 @@
         </div>
         <div class="cargas-pagination-nav">
           <button 
-            class="btn-cargas-page" 
+            type="button"
+            class="btn-cargas-page"
             @click="toggleCargasOrder"
             title="Cambiar orden cronológico de las columnas"
           >
             Orden: {{ cargasOrder === 'asc' ? 'Antiguas primero ➔' : 'Recientes primero ➔' }}
           </button>
           <button 
-            class="btn-cargas-page" 
+            type="button"
+            class="btn-cargas-page"
             :disabled="!hasOlderCargas" 
             @click="olderCargas"
             title="Ver cargas más antiguas"
@@ -220,7 +222,8 @@
             ◀ Cargas más antiguas
           </button>
           <button 
-            class="btn-cargas-page" 
+            type="button"
+            class="btn-cargas-page"
             :disabled="!hasNewerCargas" 
             @click="newerCargas"
             title="Ver cargas más recientes"
@@ -236,15 +239,16 @@
             Mostrando {{ (currentPage - 1) * itemsPerPage + 1 }} - {{ Math.min(currentPage * itemsPerPage, totalVulns) }} de {{ totalVulns }} vulnerabilidades
           </span>
           <div class="pagination-nav">
-            <button class="btn-icon-page" :disabled="currentPage === 1" @click="jumpBackward" title="Retroceder 10 páginas" aria-label="Retroceder 10 páginas">
+            <button type="button" class="btn-icon-page" :disabled="currentPage === 1" @click="jumpBackward" title="Retroceder 10 páginas" aria-label="Retroceder 10 páginas">
               <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round"><polyline points="13 17 8 12 13 7"></polyline><polyline points="19 17 14 12 19 7"></polyline></svg>
             </button>
-            <button class="btn-icon-page" :disabled="currentPage === 1" @click="prevPage" title="Anterior">
+            <button type="button" class="btn-icon-page" :disabled="currentPage === 1" @click="prevPage" title="Anterior">
               <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"></polyline></svg>
             </button>
             <div class="page-numbers">
               <template v-for="(item, idx) in visiblePages" :key="`top-${item}-${idx}`">
                 <button
+                  type="button"
                   v-if="typeof item === 'number'"
                   class="btn-page"
                   :class="{ 'active': currentPage === item }"
@@ -255,10 +259,10 @@
                 <span v-else class="pagination-ellipsis">...</span>
               </template>
             </div>
-            <button class="btn-icon-page" :disabled="currentPage === totalPages" @click="nextPage" title="Siguiente">
+            <button type="button" class="btn-icon-page" :disabled="currentPage === totalPages" @click="nextPage" title="Siguiente">
               <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"></polyline></svg>
             </button>
-            <button class="btn-icon-page" :disabled="currentPage === totalPages" @click="jumpForward" title="Avanzar 10 páginas" aria-label="Avanzar 10 páginas">
+            <button type="button" class="btn-icon-page" :disabled="currentPage === totalPages" @click="jumpForward" title="Avanzar 10 páginas" aria-label="Avanzar 10 páginas">
               <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round"><polyline points="11 17 16 12 11 7"></polyline><polyline points="5 17 10 12 5 7"></polyline></svg>
             </button>
           </div>
@@ -323,15 +327,16 @@
 
         <div v-if="totalPages > 1" class="pagination-controls-bottom">
           <div class="pagination-nav" style="margin-left: auto;">
-            <button class="btn-icon-page" :disabled="currentPage === 1" @click="jumpBackward" title="Retroceder 10 páginas" aria-label="Retroceder 10 páginas">
+            <button type="button" class="btn-icon-page" :disabled="currentPage === 1" @click="jumpBackward" title="Retroceder 10 páginas" aria-label="Retroceder 10 páginas">
               <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round"><polyline points="13 17 8 12 13 7"></polyline><polyline points="19 17 14 12 19 7"></polyline></svg>
             </button>
-            <button class="btn-icon-page" :disabled="currentPage === 1" @click="prevPage" title="Anterior">
+            <button type="button" class="btn-icon-page" :disabled="currentPage === 1" @click="prevPage" title="Anterior">
               <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"></polyline></svg>
             </button>
             <div class="page-numbers">
               <template v-for="(item, idx) in visiblePages" :key="`bottom-${item}-${idx}`">
                 <button
+                  type="button"
                   v-if="typeof item === 'number'"
                   class="btn-page"
                   :class="{ 'active': currentPage === item }"
@@ -342,10 +347,10 @@
                 <span v-else class="pagination-ellipsis">...</span>
               </template>
             </div>
-            <button class="btn-icon-page" :disabled="currentPage === totalPages" @click="nextPage" title="Siguiente">
+            <button type="button" class="btn-icon-page" :disabled="currentPage === totalPages" @click="nextPage" title="Siguiente">
               <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"></polyline></svg>
             </button>
-            <button class="btn-icon-page" :disabled="currentPage === totalPages" @click="jumpForward" title="Avanzar 10 páginas" aria-label="Avanzar 10 páginas">
+            <button type="button" class="btn-icon-page" :disabled="currentPage === totalPages" @click="jumpForward" title="Avanzar 10 páginas" aria-label="Avanzar 10 páginas">
               <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round"><polyline points="11 17 16 12 11 7"></polyline><polyline points="5 17 10 12 5 7"></polyline></svg>
             </button>
           </div>

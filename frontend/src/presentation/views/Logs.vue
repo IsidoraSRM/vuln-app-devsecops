@@ -16,8 +16,9 @@
         <input v-model="filter" placeholder="request_id or free text" />
       </label>
 
-      <div class="seg" role="group" aria-label="Filtrar por nivel">
+      <div class="seg" aria-label="Filtrar por nivel">
         <button
+          type="button"
           v-for="opt in levelOptions" :key="opt.key"
           :class="['seg-btn', `seg-${opt.key}`, { active: levelFilter === opt.key }]"
           @click="levelFilter = opt.key"
@@ -28,8 +29,8 @@
       <label class="ctrl">cada
         <input type="number" v-model.number="intervalSec" min="1" style="width:4rem" /> s
       </label>
-      <button class="btn" @click="refresh">Actualizar</button>
-      <button class="btn ghost" @click="clearFilter">Limpiar</button>
+      <button type="button" class="btn" @click="refresh">Actualizar</button>
+      <button type="button" class="btn ghost" @click="clearFilter">Limpiar</button>
     </div>
 
     <div class="log-scroll">
@@ -111,7 +112,7 @@ function levelKey(level) {
 function fmtTime(ts) {
   if (!ts) return { t: '', d: '' }
   const dt = new Date(ts)
-  if (isNaN(dt.getTime())) return { t: String(ts), d: '' }
+  if (Number.isNaN(dt.getTime())) return { t: String(ts), d: '' }
   const pad = (n) => String(n).padStart(2, '0')
   const ms = String(dt.getMilliseconds()).padStart(3, '0')
   return {
@@ -266,13 +267,13 @@ onUnmounted(stopTimer)
 .t-date { display: block; font-size: 0.68rem; color: var(--text-muted); }
 
 .badge { display: inline-block; font-size: 0.66rem; font-weight: 700; letter-spacing: 0.05em; padding: 0.15rem 0.45rem; border-radius: 5px; }
-.lvl-info { color: #1d4ed8; background: rgba(29,78,216,0.12); }
+.lvl-info { color: #1e40af; background: #dbeafe; }
 .lvl-warn { color: var(--warning); background: var(--warning-bg); }
 .lvl-error { color: var(--danger); background: var(--danger-bg); }
 .lvl-debug { color: var(--text-muted); background: var(--bg-dark); }
 .lvl-raw { color: var(--text-muted); background: var(--bg-dark); }
 
-.evt { display: block; color: var(--text-main); font-weight: 600; word-break: break-word; }
+.evt { display: block; color: var(--text-main); font-weight: 600; overflow-wrap: break-word; }
 .logger { display: block; font-size: 0.68rem; color: var(--text-muted); font-family: ui-monospace, monospace; margin-top: 0.1rem; }
 
 .chips { display: flex; flex-wrap: wrap; gap: 0.3rem; }

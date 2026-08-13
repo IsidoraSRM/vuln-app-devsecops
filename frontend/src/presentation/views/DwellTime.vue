@@ -134,6 +134,8 @@ async function loadConnections() {
     const res = await wazuhService.getConnections()
     connections.value = res.data || []
   } catch (e) {
+    // Sin conexiones (o backend caído): se deja solo "Todas las conexiones".
+    console.warn('No se pudieron cargar las conexiones:', e)
     connections.value = []
   }
 }

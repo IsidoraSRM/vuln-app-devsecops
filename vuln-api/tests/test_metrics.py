@@ -228,3 +228,55 @@ def test_metrics_summary_by_connection(client, db_session):
     assert res_b.status_code == 200
     assert res_b.json()["total"] == 0
     assert res_b.json()["critical"] == 0
+
+
+def test_dwell_time_sla_and_active_exposure(client, db_session):
+    """Cubre las secciones nuevas: cumplimiento de SLA + exposicion en curso (activas)."""
+    _create_user(db_session)
+    conn = _create_connection(db_session)
+    # 2 criticas resueltas: una en 5d (dentro del SLA de 15d) y otra en 40d (fuera)
+    _create_vuln(db_session, conn.id, "CVE-2026-4001", severity="Critical",
+                 resolved_at=BASE + timedelta(days=5))
+    _create_vuln(db_session, conn.id, "CVE-2026-4002", severity="Critical",
+                 resolved_at=BASE + timedelta(days=40))
+    # 1 ACTIVE (para exposicion en curso)
+    _create_vuln(db_session, conn.id, "CVE-2026-4003", severity="High", status="ACTIVE",
+                 first_seen=BASE)
+    headers = _get_headers(client)
+
+    body = client.get("/vulns/metrics/dwell-time", headers=headers).json()
+    # SLA critica: 1 de 2 dentro del objetivo -> 50%
+    assert body["sla"]["by_severity"]["CRITICAL"]["total"] == 2
+    assert body["sla"]["by_severity"]["CRITICAL"]["within"] == 1
+    assert body["sla"]["by_severity"]["CRITICAL"]["pct"] == 50.0
+    assert body["sla"]["overall"]["pct"] == 50.0
+    # Exposicion en curso: 1 activa
+    assert body["active_exposure"]["overall"]["count"] == 1
+    assert body["active_exposure"]["overall"]["median_days"] is not None
+    assert body["active_exposure"]["by_severity"]["HIGH"]["count"] == 1
+
+
+def test_dwell_time_python_fallback(client, db_session, monkeypatch):
+    """Fuerza el fallback Python (aunque el DB sea Postgres) para cubrir _sla_from_day_lists y
+    _active_exposure_python: si _dwell_time_sql falla, get_dwell_time calcula todo en Python."""
+    from app.routers import metricsRouter
+
+    def _raise(*args, **kwargs):
+        raise RuntimeError("forzar fallback")
+    monkeypatch.setattr(metricsRouter, "_dwell_time_sql", _raise)
+
+    _create_user(db_session)
+    conn = _create_connection(db_session)
+    _create_vuln(db_session, conn.id, "CVE-2026-5001", severity="High",
+                 resolved_at=BASE + timedelta(days=10))
+    _create_vuln(db_session, conn.id, "CVE-2026-5002", severity="Critical", status="ACTIVE",
+                 first_seen=BASE)
+    headers = _get_headers(client)
+
+    body = client.get("/vulns/metrics/dwell-time", headers=headers).json()
+    assert body["overall"]["count"] == 1
+    # High resuelta en 10d cumple el SLA (<=30d)
+    assert body["sla"]["overall"]["within"] == 1
+    assert body["sla"]["by_severity"]["HIGH"]["pct"] == 100.0
+    # 1 activa en exposicion en curso
+    assert body["active_exposure"]["overall"]["count"] == 1
