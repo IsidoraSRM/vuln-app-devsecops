@@ -1,7 +1,10 @@
 """Tests de GET /vulns: filtros combinables, rangos de score y ordenamiento."""
+from datetime import datetime
+
+import pytest
 from sqlalchemy import text
 
-from app.models import User, WazuhConnection, WazuhVulnerability
+from app.models import IS_SQLITE, User, WazuhConnection, WazuhVulnerability
 from app.services.authService import hash_password
 from app.crypto import encrypt
 
@@ -164,3 +167,55 @@ def test_totals_via_mv_and_fallback(client, db_session):
     # filtro avanzado (os_platform) -> total via conteo en vivo (fallback)
     res = client.get("/vulns?os_platform=ubuntu", headers=headers)
     assert res.json()["total"] == 2
+
+
+def test_mv_count_query_binds_and_counts(db_session):
+    """Regresion del binding: `:param::text[]` NO se parsea como bindparam en SQLAlchemy (el `::`
+    se come el nombre del parametro) -> list_vulns caia SIEMPRE al conteo lento silenciosamente.
+    Corre la MISMA query de la MV (con CAST) y confirma que bindea sin error y cuenta bien."""
+    if IS_SQLITE:
+        pytest.skip("mv_vuln_counts solo existe en Postgres")
+    _create_user(db_session)
+    _seed(db_session)
+    db_session.execute(text("SELECT refresh_vulnerability_filters();"))
+    db_session.commit()
+    total = db_session.execute(text("""
+        SELECT COALESCE(SUM(n), 0) FROM mv_vuln_counts
+        WHERE (:conn IS NULL OR connection_id = :conn)
+          AND (:status_u IS NULL OR status = :status_u)
+          AND (CAST(:sevs AS text[]) IS NULL OR severity = ANY(CAST(:sevs AS text[])))
+    """).bindparams(conn=None, status_u="ACTIVE", sevs=["CRITICAL"])).scalar()
+    assert int(total) == 1  # 1 Critical ACTIVE en el seed
+
+
+def test_date_range_filters_apply_in_both_paths(client, db_session):
+    """Regresion #1: detected_before se IGNORABA en el camino del stored procedure (produccion),
+    porque el SP solo tenia days_ago. El fallback (SQLite) si lo aplicaba -> el bug se escondia
+    (test verde por el resultado del fallback, no por el camino real). Ahora las fechas se aplican
+    como filtro ORM en AMBOS caminos. En Postgres este test ejerce el camino SP (el que estaba roto)."""
+    _create_user(db_session)
+    conn = WazuhConnection(
+        name="dates-conn", indexer_url="https://wazuh.local:9200",
+        wazuh_user="admin", wazuh_password=encrypt("secret"), is_active=True,
+    )
+    db_session.add(conn)
+    db_session.commit()
+    db_session.refresh(conn)
+    for cve, fs in [("CVE-OLD", datetime(2020, 1, 1)), ("CVE-NEW", datetime(2026, 1, 1))]:
+        db_session.add(WazuhVulnerability(
+            connection_id=conn.id, status="ACTIVE", agent_id="001", agent_name="h",
+            package_name="pkg", package_version="1.0", cve_id=cve, severity="High",
+            score_base=7.5, os_platform="ubuntu", first_seen=fs,
+        ))
+    db_session.commit()
+    headers = _get_headers(client)
+
+    # detected_before=2023 -> SOLO CVE-OLD (2020). CVE-NEW (2026) debe quedar FUERA.
+    res = client.get("/vulns?detected_before=2023-01-01T00:00:00", headers=headers)
+    cves = _cves(res)
+    assert "CVE-OLD" in cves
+    assert "CVE-NEW" not in cves  # <- fallaba en el camino SP (Postgres) antes del fix
+
+    # detected_after=2025 -> SOLO CVE-NEW (2026).
+    res = client.get("/vulns?detected_after=2025-01-01T00:00:00", headers=headers)
+    assert _cves(res) == ["CVE-NEW"]

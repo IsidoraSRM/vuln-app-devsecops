@@ -151,8 +151,14 @@ def _process_pg_batch(db: Session, conn_id: int, raw_vulns: list) -> int:
         }
     
     if not unique_batch_vulns:
+        # Llegaron docs crudos (raw_vulns no vacio, se filtro al entrar) pero NINGUNO quedo: todos sin
+        # cve_id. Posible cambio de esquema en el Wazuh de origen (p.ej. el CVE en otra clave). NO en
+        # silencio -> un sync "exitoso" que guarda 0 filas sin avisar seria el mismo fallo oculto que
+        # ya cazamos (test verde por el resultado, no por el camino).
+        log.warning("wazuh_batch_all_docs_skipped_no_cve",
+                    extra={"connection_id": conn_id, "raw_count": len(raw_vulns)})
         return 0
-        
+
     values = list(unique_batch_vulns.values())
 
     # Las TEMP tables son por-CONEXION. Con commit por lote, un commit devuelve la conexion al pool

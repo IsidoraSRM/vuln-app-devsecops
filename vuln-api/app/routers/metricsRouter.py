@@ -1,3 +1,4 @@
+import logging
 import math
 from datetime import datetime, timezone
 from statistics import mean, median
@@ -10,6 +11,8 @@ from sqlalchemy.sql import func, text
 from ..db import get_db
 from ..models import User, WazuhVulnerability, VulnerabilityHistory
 from ..services.authService import get_current_user
+
+log = logging.getLogger(__name__)
 
 # Prefijo /vulns/metrics: no puede ser /metrics porque app.mount("/metrics")
 # (exposición Prometheus) captura cualquier ruta bajo /metrics/*.
@@ -124,7 +127,10 @@ def get_dwell_time(
     if not IS_SQLITE:
         try:
             return _dwell_time_sql(db, connection_id)
-        except Exception:
+        except Exception as e:
+            # Si el SQL nativo falla NO debe pasar en silencio (asi no se esconde un bug como el
+            # binding `::`): logueamos y recien ahi caemos al calculo en Python.
+            log.warning("dwell_time_sql_failed_using_python_fallback", extra={"error": str(e)})
             db.rollback()
 
     resolved_events = (

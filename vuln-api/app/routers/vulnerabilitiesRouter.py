@@ -1,12 +1,22 @@
+import logging
+
 from fastapi import APIRouter, Depends, Query, BackgroundTasks
 from sqlalchemy.orm import Session, selectinload
 from sqlalchemy.sql import func, text
 from typing import Optional, List
 from datetime import datetime
 from ..db import get_db
-from ..models import User, WazuhConnection, WazuhVulnerability
+from ..models import User, WazuhConnection, WazuhVulnerability, IS_SQLITE
 from ..services.authService import get_current_user
 from ..services.wazuhService import perform_sync_task
+
+log = logging.getLogger(__name__)
+
+# Cap para las listas de filtros de ALTA cardinalidad (CVE / paquete). Los dropdowns no pueden
+# mostrar (ni el usuario recorrer) cientos de miles de opciones; sin cap, /filters hace un DISTINCT
+# sobre toda la tabla (medido: ~631ms a 250k CVEs) y manda un payload enorme. Agentes/severidades/OS
+# son de baja cardinalidad y se devuelven completos.
+FILTER_LIST_CAP = 1000
 
 router = APIRouter(prefix="/vulns", tags=["vulnerabilities"])
 
@@ -51,29 +61,20 @@ def list_vulns(
     if limit is None or limit > MAX_PAGE_LIMIT:
         limit = MAX_PAGE_LIMIT
 
-    # 1. Ejecutar el Procedimiento Almacenado para el filtrado masivo
-    days_ago = None
-    if detected_after:
-        now = datetime.utcnow()
-        if detected_after.tzinfo:
-            now = datetime.now(detected_after.tzinfo)
-        days_ago = max(0, (now - detected_after).days)
-
-    sp_params = {
-        "sevs": severity,
-        "oses": os_platform,
-        "statuses": [status] if status else None,
-        "agents": agent_name,
-        "days_ago": days_ago
-    }
-    
+    # 1. Detectar si el stored procedure de filtrado esta disponible (Postgres). En SQLite (tests)
+    # la sonda falla y se usa el fallback ORM. OJO: las fechas (detected_after/detected_before) NO se
+    # pasan al SP -> se aplican como filtro ORM mas abajo, en AMBOS caminos (antes el SP solo tenia
+    # days_ago e IGNORABA detected_before, colando filas fuera de rango en produccion).
     sp_exists = False
     try:
-        # Usamos la sintaxis de casteo estricta para Postgres (TEXT[] y INT)
-        # Si estamos en SQLite (los tests), esto fallará inmediatamente y usará el fallback.
         db.execute(text("SELECT 1 FROM sp_filter_vulnerabilities(NULL::TEXT[], NULL::TEXT[], NULL::TEXT[], NULL::TEXT[], NULL::INT) LIMIT 0"))
         sp_exists = True
-    except Exception:
+    except Exception as e:
+        # En SQLite la sonda falla siempre (no hay SP) -> esperado, no se loguea. En Postgres NO
+        # deberia fallar: si falla, se loguea (no en silencio) porque degradaria TODA la lista al
+        # camino lento sin avisar (mismo tipo de bug que el binding `::` que se escondia).
+        if not IS_SQLITE:
+            log.warning("sp_filter_probe_failed_using_orm_fallback", extra={"error": str(e)})
         db.rollback()
         sp_exists = False
 
@@ -86,7 +87,7 @@ def list_vulns(
         query = query.filter(text("""
             wazuh_vulnerabilities.id IN (
                 SELECT id FROM sp_filter_vulnerabilities(
-                    :sevs, :oses, :statuses, :agents, :days_ago
+                    :sevs, :oses, :statuses, :agents
                 )
             )
         """).bindparams(
@@ -94,7 +95,6 @@ def list_vulns(
             oses=os_platform,
             statuses=[status] if status else None,
             agents=agent_name,
-            days_ago=days_ago
         ))
     else:
         # Lógica original (Fallback)
@@ -106,10 +106,14 @@ def list_vulns(
             query = query.filter(WazuhVulnerability.os_platform.in_(os_platform))
         if status:
             query = query.filter(func.upper(WazuhVulnerability.status) == status.upper())
-        if detected_after:
-            query = query.filter(WazuhVulnerability.first_seen >= detected_after)
-        if detected_before:
-            query = query.filter(WazuhVulnerability.first_seen <= detected_before)
+
+    # Filtros de fecha: se aplican en AMBOS caminos (el SP ya NO maneja fechas). Con el semi-join
+    # `id IN (SELECT id FROM sp(...))` el planner combina esto con el idx_vuln_first_seen. Antes el
+    # camino SP solo recibia days_ago (granularidad de dia) e ignoraba por completo detected_before.
+    if detected_after:
+        query = query.filter(WazuhVulnerability.first_seen >= detected_after)
+    if detected_before:
+        query = query.filter(WazuhVulnerability.first_seen <= detected_before)
 
     # Filtros adicionales que no están en el SP general
     if current_user.role != "superadmin":
@@ -144,17 +148,22 @@ def list_vulns(
                 eff_conn = current_user.assigned_connection_id or -1
             else:
                 eff_conn = connection_id
+            # OJO: `:param::text[]` NO se parsea como bindparam en SQLAlchemy (el `::` se come el
+            # nombre) -> hay que usar CAST(:param AS text[]). status es un valor unico (sin array).
             total_count = int(db.execute(text("""
                 SELECT COALESCE(SUM(n), 0) FROM mv_vuln_counts
                 WHERE (:conn IS NULL OR connection_id = :conn)
-                  AND (:statuses::text[] IS NULL OR status = ANY(:statuses::text[]))
-                  AND (:sevs::text[] IS NULL OR severity = ANY(:sevs::text[]))
+                  AND (:status_u IS NULL OR status = :status_u)
+                  AND (CAST(:sevs AS text[]) IS NULL OR severity = ANY(CAST(:sevs AS text[])))
             """).bindparams(
                 conn=eff_conn,
-                statuses=[status.upper()] if status else None,
+                status_u=status.upper() if status else None,
                 sevs=[s.upper() for s in severity] if severity else None,
             )).scalar())
-        except Exception:
+        except Exception as e:
+            # NO en silencio: si el fast-path de la MV falla, se loguea (asi un bug como el binding
+            # `::` no se esconde) y recien ahi caemos al conteo en vivo.
+            log.warning("mv_vuln_counts_fastpath_failed_using_live_count", extra={"error": str(e)})
             db.rollback()
             total_count = None
     if total_count is None:
@@ -311,8 +320,8 @@ def get_unique_filters(
     try:
         if connection_id is not None and connection_id != -1:
             agents_res = db.execute(text("SELECT agent_name FROM mv_unique_agents WHERE connection_id = :conn_id"), {"conn_id": connection_id}).fetchall()
-            cves_res = db.execute(text("SELECT cve_id FROM mv_unique_cves WHERE connection_id = :conn_id"), {"conn_id": connection_id}).fetchall()
-            packages_res = db.execute(text("SELECT package_name FROM mv_unique_packages WHERE connection_id = :conn_id"), {"conn_id": connection_id}).fetchall()
+            cves_res = db.execute(text("SELECT cve_id FROM mv_unique_cves WHERE connection_id = :conn_id LIMIT :cap"), {"conn_id": connection_id, "cap": FILTER_LIST_CAP}).fetchall()
+            packages_res = db.execute(text("SELECT package_name FROM mv_unique_packages WHERE connection_id = :conn_id LIMIT :cap"), {"conn_id": connection_id, "cap": FILTER_LIST_CAP}).fetchall()
             severities_res = db.execute(text("SELECT severity FROM mv_unique_severities WHERE connection_id = :conn_id"), {"conn_id": connection_id}).fetchall()
             os_res = db.execute(text("SELECT os_platform, os_version FROM mv_unique_os WHERE connection_id = :conn_id"), {"conn_id": connection_id}).fetchall()
         elif connection_id == -1:
@@ -323,8 +332,10 @@ def get_unique_filters(
             os_res = []
         else:
             agents_res = db.execute(text("SELECT DISTINCT agent_name FROM mv_unique_agents")).fetchall()
-            cves_res = db.execute(text("SELECT DISTINCT cve_id FROM mv_unique_cves")).fetchall()
-            packages_res = db.execute(text("SELECT DISTINCT package_name FROM mv_unique_packages")).fetchall()
+            # Sin DISTINCT: el cap con LIMIT corta rapido (lee :cap filas y para) en vez de agregar
+            # las 250k. Se deduplica en Python al final (barato con <= :cap filas).
+            cves_res = db.execute(text("SELECT cve_id FROM mv_unique_cves LIMIT :cap"), {"cap": FILTER_LIST_CAP}).fetchall()
+            packages_res = db.execute(text("SELECT package_name FROM mv_unique_packages LIMIT :cap"), {"cap": FILTER_LIST_CAP}).fetchall()
             severities_res = db.execute(text("SELECT DISTINCT severity FROM mv_unique_severities")).fetchall()
             os_res = db.execute(text("SELECT DISTINCT os_platform, os_version FROM mv_unique_os")).fetchall()
 
@@ -334,16 +345,17 @@ def get_unique_filters(
         severities = [r[0] for r in severities_res if r[0]]
         os_list = [{"platform": r[0], "version": r[1]} for r in os_res if r[0]]
 
-    except Exception:
+    except Exception as e:
         # Fallback para desarrollo local con SQLite sin vistas materializadas.
+        log.warning("filters_mv_read_failed_using_live_query", extra={"error": str(e)})
         db.rollback()
         query = db.query(WazuhVulnerability)
         if connection_id is not None:
             query = query.filter(WazuhVulnerability.connection_id == connection_id)
         
         agents = [r[0] for r in query.with_entities(WazuhVulnerability.agent_name).distinct().all() if r[0]]
-        cves = [r[0] for r in query.with_entities(WazuhVulnerability.cve_id).distinct().all() if r[0]]
-        packages = [r[0] for r in query.with_entities(WazuhVulnerability.package_name).distinct().all() if r[0]]
+        cves = [r[0] for r in query.with_entities(WazuhVulnerability.cve_id).distinct().limit(FILTER_LIST_CAP).all() if r[0]]
+        packages = [r[0] for r in query.with_entities(WazuhVulnerability.package_name).distinct().limit(FILTER_LIST_CAP).all() if r[0]]
         severities = [r[0] for r in query.with_entities(WazuhVulnerability.severity).distinct().all() if r[0]]
         os_query_res = query.with_entities(WazuhVulnerability.os_platform, WazuhVulnerability.os_version).distinct().all()
         os_list = [{"platform": r[0], "version": r[1]} for r in os_query_res if r[0]]
@@ -359,8 +371,8 @@ def get_unique_filters(
 
     return {
         "agents": sorted(agents),
-        "cves": sorted(cves),
-        "packages": sorted(packages),
+        "cves": sorted(set(cves)),
+        "packages": sorted(set(packages)),
         "severities": sorted(severities),
         "os": unique_os
     }
@@ -389,8 +401,9 @@ def get_metrics_summary(
         if row is None:
             return {"total": 0, "critical": 0, "high": 0, "medium": 0, "low": 0}
         return {"total": row[0], "critical": row[1], "high": row[2], "medium": row[3], "low": row[4]}
-    except Exception:
+    except Exception as e:
         # Fallback (SQLite/tests o si la MV aun no existe): calculo en vivo (logica original).
+        log.warning("metrics_summary_mv_read_failed_using_live_query", extra={"error": str(e)})
         db.rollback()
 
     # Group by severity and count distinct CVE IDs
