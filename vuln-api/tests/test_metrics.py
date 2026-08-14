@@ -250,10 +250,10 @@ def test_dwell_time_sla_and_active_exposure(client, db_session):
     assert body["sla"]["by_severity"]["CRITICAL"]["within"] == 1
     assert body["sla"]["by_severity"]["CRITICAL"]["pct"] == 50.0
     assert body["sla"]["overall"]["pct"] == 50.0
-    # Exposicion en curso: 1 activa
+    # Exposicion en curso: 1 activa (first_seen en mayo -> >90 dias expuesta a la fecha)
     assert body["active_exposure"]["overall"]["count"] == 1
-    assert body["active_exposure"]["overall"]["median_days"] is not None
-    assert body["active_exposure"]["by_severity"]["HIGH"]["count"] == 1
+    assert body["active_exposure"]["overall"]["avg_days"] is not None
+    assert body["active_exposure"]["overall"]["over_90"] == 1
 
 
 def test_dwell_time_python_fallback(client, db_session, monkeypatch):

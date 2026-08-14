@@ -87,65 +87,46 @@ def _sla_from_day_lists(by_sev_days):
 
 def _active_exposure_python(db, connection_id):
     """Exposicion EN CURSO (fallback SQLite/Python): antiguedad de las vulns ACTIVE = hoy - first_seen."""
-    q = db.query(WazuhVulnerability.severity, WazuhVulnerability.first_seen).filter(
+    q = db.query(WazuhVulnerability.first_seen).filter(
         WazuhVulnerability.status == "ACTIVE", WazuhVulnerability.first_seen.isnot(None))
     if connection_id:
         q = q.filter(WazuhVulnerability.connection_id == connection_id)
     now = datetime.now(timezone.utc)
-    ages = []
-    by_sev = {}
-    for sev, fs in q.all():
-        age = _to_days(fs, now)
-        ages.append(age)
-        by_sev.setdefault((sev or "UNKNOWN").upper(), []).append(age)
-    s = _stats(ages)
-    overall = {"count": s["count"], "avg_days": s["avg_days"], "median_days": s["median_days"],
-               "p90_days": s["p90_days"], "max_days": s["max_days"],
-               "over_30": sum(1 for a in ages if a > 30), "over_90": sum(1 for a in ages if a > 90)}
-    by_severity = {}
-    for sev, vals in sorted(by_sev.items()):
-        ss = _stats(vals)
-        by_severity[sev] = {"count": ss["count"], "median_days": ss["median_days"], "max_days": ss["max_days"]}
-    return {"overall": overall, "by_severity": by_severity}
+    ages = [_to_days(fs, now) for (fs,) in q.all()]
+    if ages:
+        overall = {"count": len(ages), "avg_days": round(mean(ages), 2), "max_days": round(max(ages), 2),
+                   "over_30": sum(1 for a in ages if a > 30), "over_90": sum(1 for a in ages if a > 90)}
+    else:
+        overall = {"count": 0, "avg_days": None, "max_days": None, "over_30": 0, "over_90": 0}
+    return {"overall": overall, "by_severity": {}}
 
 
 def _active_exposure_sql(db, connection_id):
-    """Exposicion EN CURSO (Postgres nativo): antiguedad de las vulns ACTIVE, sin traer filas a Python."""
+    """Exposicion EN CURSO (Postgres nativo): antiguedad de las vulns ACTIVE. Solo agregados SIN
+    ORDER BY -> a proposito NO calcula mediana/p90: con 1M+ activas el sort de percentiles costaba
+    ~2s, mientras count/avg/max/buckets van ~0.2s. Los buckets (>30/>90) dan el detalle accionable."""
     cf = "AND connection_id = :cid" if connection_id else ""
     params = {"cid": connection_id} if connection_id else {}
     age = "GREATEST(EXTRACT(EPOCH FROM (now() - first_seen)) / 86400.0, 0)::double precision"
+    # Un solo agregado global (sin GROUP BY ni sort): a 1M+ activas va ~0.2s. `age` se calcula una
+    # vez por fila en el subquery. No se desglosa por severidad (la UI solo muestra los KPIs globales).
     sql = f"""
-        WITH act AS MATERIALIZED (
-            SELECT {age} AS age, COALESCE(UPPER(severity), 'UNKNOWN') AS sev
-            FROM wazuh_vulnerabilities
-            WHERE status = 'ACTIVE' AND first_seen IS NOT NULL {cf}
-        )
-        SELECT 'overall' AS kind, NULL::text AS grp, count(*), avg(age),
-               percentile_cont(0.5) WITHIN GROUP (ORDER BY age),
-               percentile_disc(0.9) WITHIN GROUP (ORDER BY age), max(age),
+        SELECT count(*), avg(age), max(age),
                count(*) FILTER (WHERE age > 30)::double precision,
                count(*) FILTER (WHERE age > 90)::double precision
-        FROM act
-        UNION ALL
-        SELECT 'sev', sev, count(*), avg(age),
-               percentile_cont(0.5) WITHIN GROUP (ORDER BY age),
-               percentile_disc(0.9) WITHIN GROUP (ORDER BY age), max(age),
-               NULL::double precision, NULL::double precision
-        FROM act GROUP BY sev
+        FROM (
+            SELECT {age} AS age
+            FROM wazuh_vulnerabilities
+            WHERE status = 'ACTIVE' AND first_seen IS NOT NULL {cf}
+        ) t
     """
-    rows = db.execute(text(sql), params).fetchall()
-    overall = {"count": 0, "avg_days": None, "median_days": None, "p90_days": None,
-               "max_days": None, "over_30": 0, "over_90": 0}
-    by_sev = {}
-    for r in rows:
-        kind, grp, cnt = r[0], r[1], r[2]
-        if kind == "overall" and cnt:
-            overall = {"count": int(cnt), "avg_days": round(float(r[3]), 2), "median_days": round(float(r[4]), 2),
-                       "p90_days": round(float(r[5]), 2), "max_days": round(float(r[6]), 2),
-                       "over_30": int(r[7]), "over_90": int(r[8])}
-        elif kind == "sev" and cnt:
-            by_sev[grp] = {"count": int(cnt), "median_days": round(float(r[4]), 2), "max_days": round(float(r[6]), 2)}
-    return {"overall": overall, "by_severity": dict(sorted(by_sev.items()))}
+    r = db.execute(text(sql), params).fetchone()
+    if r and r[0]:
+        overall = {"count": int(r[0]), "avg_days": round(float(r[1]), 2), "max_days": round(float(r[2]), 2),
+                   "over_30": int(r[3]), "over_90": int(r[4])}
+    else:
+        overall = {"count": 0, "avg_days": None, "max_days": None, "over_30": 0, "over_90": 0}
+    return {"overall": overall, "by_severity": {}}
 
 
 def _dwell_time_sql(db: Session, connection_id):

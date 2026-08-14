@@ -32,7 +32,7 @@ describe('DwellTime.vue', () => {
                     by_severity: { CRITICAL: { within: 2, total: 2, pct: 100, target_days: 15 } },
                 },
                 active_exposure: {
-                    overall: { count: 7, median_days: 40, p90_days: 100, max_days: 120, over_30: 5, over_90: 2 },
+                    overall: { count: 7, avg_days: 40, max_days: 120, over_30: 5, over_90: 2 },
                     by_severity: {},
                 },
             }
