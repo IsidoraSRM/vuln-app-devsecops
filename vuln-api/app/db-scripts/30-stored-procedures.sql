@@ -5,6 +5,8 @@ CREATE INDEX IF NOT EXISTS idx_vuln_status ON wazuh_vulnerabilities(status);
 CREATE INDEX IF NOT EXISTS idx_vuln_os_platform ON wazuh_vulnerabilities(os_platform);
 CREATE INDEX IF NOT EXISTS idx_vuln_first_seen ON wazuh_vulnerabilities(first_seen);
 CREATE INDEX IF NOT EXISTS idx_vuln_agent_name ON wazuh_vulnerabilities(agent_name);
+-- (status, first_seen): index-only scan para la "exposicion en curso" (antiguedad de las activas)
+CREATE INDEX IF NOT EXISTS idx_vuln_status_first_seen ON wazuh_vulnerabilities(status, first_seen);
 
 -- 2. PROCEDIMIENTOS ALMACENADOS INDIVIDUALES (Para máxima modularidad)
 

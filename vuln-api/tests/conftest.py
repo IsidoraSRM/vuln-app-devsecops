@@ -32,7 +32,12 @@ def db_session():
     """Crea una sesión de base de datos limpia para cada test"""
     # Crear todas las tablas
     Base.metadata.create_all(bind=engine)
-    
+
+    # Limpiar el cache en proceso del dwell-time para que el resultado de un test no se filtre al
+    # siguiente (el cache es a nivel de modulo y persiste entre tests).
+    from app.routers.metricsRouter import _DWELL_CACHE
+    _DWELL_CACHE.clear()
+
     # Crear sesión
     db = TestingSessionLocal()
     

@@ -76,8 +76,7 @@
         </div>
         <div class="kpis">
           <div class="kpi warn"><span class="kpi-val">{{ activeCount.toLocaleString() }}</span><span class="kpi-lbl">Activas</span></div>
-          <div class="kpi"><span class="kpi-val">{{ fmt(activeExposure.overall.avg_days) }}<small> d</small></span><span class="kpi-lbl">Antigüedad promedio</span></div>
-          <div class="kpi"><span class="kpi-val">{{ fmt(activeExposure.overall.max_days) }}<small> d</small></span><span class="kpi-lbl">Máxima</span></div>
+          <div class="kpi"><span class="kpi-val">{{ fmt(activeExposure.overall.max_days) }}<small> d</small></span><span class="kpi-lbl">Antigüedad máxima</span></div>
           <div class="kpi warn"><span class="kpi-val">{{ (activeExposure.overall.over_30 || 0).toLocaleString() }}</span><span class="kpi-lbl">&gt; 30 días</span></div>
           <div class="kpi bad"><span class="kpi-val">{{ (activeExposure.overall.over_90 || 0).toLocaleString() }}</span><span class="kpi-lbl">&gt; 90 días</span></div>
         </div>

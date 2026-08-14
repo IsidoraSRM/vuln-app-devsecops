@@ -252,8 +252,24 @@ def test_dwell_time_sla_and_active_exposure(client, db_session):
     assert body["sla"]["overall"]["pct"] == 50.0
     # Exposicion en curso: 1 activa (first_seen en mayo -> >90 dias expuesta a la fecha)
     assert body["active_exposure"]["overall"]["count"] == 1
-    assert body["active_exposure"]["overall"]["avg_days"] is not None
+    assert body["active_exposure"]["overall"]["max_days"] is not None
     assert body["active_exposure"]["overall"]["over_90"] == 1
+
+
+def test_dwell_time_cache(client, db_session):
+    """La 2a llamada devuelve el resultado cacheado (no recalcula). Se agrega otra resuelta entre
+    llamadas: sin cache el total seria 2, pero el cache devuelve el valor previo (1)."""
+    _create_user(db_session)
+    conn = _create_connection(db_session)
+    _create_vuln(db_session, conn.id, "CVE-CACHE-1", resolved_at=BASE + timedelta(days=4))
+    headers = _get_headers(client)
+
+    first = client.get("/vulns/metrics/dwell-time", headers=headers).json()
+    assert first["overall"]["count"] == 1
+
+    _create_vuln(db_session, conn.id, "CVE-CACHE-2", resolved_at=BASE + timedelta(days=6))
+    second = client.get("/vulns/metrics/dwell-time", headers=headers).json()
+    assert second["overall"]["count"] == 1  # cacheado: no recalculo pese al dato nuevo
 
 
 def test_dwell_time_python_fallback(client, db_session, monkeypatch):

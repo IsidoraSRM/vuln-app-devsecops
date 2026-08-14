@@ -69,6 +69,8 @@ def setup_db_optimizations():
         db.execute(text("CREATE INDEX IF NOT EXISTS idx_vuln_package_name ON wazuh_vulnerabilities (package_name);"))
         db.execute(text("CREATE INDEX IF NOT EXISTS idx_vuln_score_base ON wazuh_vulnerabilities (score_base);"))
         db.execute(text("CREATE INDEX IF NOT EXISTS idx_vuln_last_seen ON wazuh_vulnerabilities (last_seen);"))
+        # (status, first_seen): index-only scan para la exposicion en curso (activas por antiguedad)
+        db.execute(text("CREATE INDEX IF NOT EXISTS idx_vuln_status_first_seen ON wazuh_vulnerabilities (status, first_seen);"))
         db.commit()
     except Exception as e:
         log.warning(f"No se pudieron crear los índices estándar (puede ser SQLite): {e}")

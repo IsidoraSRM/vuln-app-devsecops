@@ -1,5 +1,6 @@
 import logging
 import math
+import time
 from datetime import datetime, timezone
 from statistics import mean, median
 from typing import Optional
@@ -13,6 +14,12 @@ from ..models import User, WazuhVulnerability, VulnerabilityHistory
 from ..services.authService import get_current_user
 
 log = logging.getLogger(__name__)
+
+# Cache en proceso del dwell-time: los agregados no cambian entre sincronizaciones, asi que se
+# cachean por connection_id con un TTL corto -> las cargas repetidas de la pagina son instantaneas
+# (la primera tras un sync recalcula). En prod corre 1 worker, asi que el cache es consistente.
+_DWELL_CACHE = {}
+_DWELL_CACHE_TTL = 120  # segundos
 
 # Prefijo /vulns/metrics: no puede ser /metrics porque app.mount("/metrics")
 # (exposición Prometheus) captura cualquier ruta bajo /metrics/*.
@@ -94,38 +101,35 @@ def _active_exposure_python(db, connection_id):
     now = datetime.now(timezone.utc)
     ages = [_to_days(fs, now) for (fs,) in q.all()]
     if ages:
-        overall = {"count": len(ages), "avg_days": round(mean(ages), 2), "max_days": round(max(ages), 2),
+        overall = {"count": len(ages), "max_days": round(max(ages), 2),
                    "over_30": sum(1 for a in ages if a > 30), "over_90": sum(1 for a in ages if a > 90)}
     else:
-        overall = {"count": 0, "avg_days": None, "max_days": None, "over_30": 0, "over_90": 0}
+        overall = {"count": 0, "max_days": None, "over_30": 0, "over_90": 0}
     return {"overall": overall, "by_severity": {}}
 
 
 def _active_exposure_sql(db, connection_id):
-    """Exposicion EN CURSO (Postgres nativo): antiguedad de las vulns ACTIVE. Solo agregados SIN
-    ORDER BY -> a proposito NO calcula mediana/p90: con 1M+ activas el sort de percentiles costaba
-    ~2s, mientras count/avg/max/buckets van ~0.2s. Los buckets (>30/>90) dan el detalle accionable."""
+    """Exposicion EN CURSO (Postgres): agrega directamente sobre first_seen (count / min / rangos de
+    fecha) en vez de calcular la edad fila por fila -> con el indice idx_vuln_status_first_seen hace
+    un index-only scan del rango ACTIVE, sin leer las 1M filas del heap (medido: full scan ~2s en la
+    VM -> index-only ~0.3s). No incluye promedio (obliga a leer todas las filas); max = hoy - la mas
+    antigua; los buckets >30/>90 = activas detectadas antes de hoy-N dias."""
     cf = "AND connection_id = :cid" if connection_id else ""
     params = {"cid": connection_id} if connection_id else {}
-    age = "GREATEST(EXTRACT(EPOCH FROM (now() - first_seen)) / 86400.0, 0)::double precision"
-    # Un solo agregado global (sin GROUP BY ni sort): a 1M+ activas va ~0.2s. `age` se calcula una
-    # vez por fila en el subquery. No se desglosa por severidad (la UI solo muestra los KPIs globales).
     sql = f"""
-        SELECT count(*), avg(age), max(age),
-               count(*) FILTER (WHERE age > 30)::double precision,
-               count(*) FILTER (WHERE age > 90)::double precision
-        FROM (
-            SELECT {age} AS age
-            FROM wazuh_vulnerabilities
-            WHERE status = 'ACTIVE' AND first_seen IS NOT NULL {cf}
-        ) t
+        SELECT count(*),
+               GREATEST(EXTRACT(EPOCH FROM (now() - min(first_seen))) / 86400.0, 0)::double precision AS max_days,
+               count(*) FILTER (WHERE first_seen < now() - interval '30 days')::double precision AS over_30,
+               count(*) FILTER (WHERE first_seen < now() - interval '90 days')::double precision AS over_90
+        FROM wazuh_vulnerabilities
+        WHERE status = 'ACTIVE' AND first_seen IS NOT NULL {cf}
     """
     r = db.execute(text(sql), params).fetchone()
     if r and r[0]:
-        overall = {"count": int(r[0]), "avg_days": round(float(r[1]), 2), "max_days": round(float(r[2]), 2),
-                   "over_30": int(r[3]), "over_90": int(r[4])}
+        overall = {"count": int(r[0]), "max_days": round(float(r[1]), 2),
+                   "over_30": int(r[2]), "over_90": int(r[3])}
     else:
-        overall = {"count": 0, "avg_days": None, "max_days": None, "over_30": 0, "over_90": 0}
+        overall = {"count": 0, "max_days": None, "over_30": 0, "over_90": 0}
     return {"overall": overall, "by_severity": {}}
 
 
@@ -233,6 +237,11 @@ def get_dwell_time(
     if current_user.role != "superadmin":
         connection_id = current_user.assigned_connection_id or -1
 
+    # Cache: el dwell-time no cambia entre sincronizaciones -> las cargas repetidas son instantaneas.
+    hit = _DWELL_CACHE.get(connection_id)
+    if hit and hit[0] > time.monotonic():
+        return hit[1]
+
     # Ruta rapida: agregados con SQL nativo (percentile_cont/percentile_disc), sin traer filas a Python.
     # El fallback de abajo (Python + statistics) queda para SQLite (tests) o si el SQL fallara.
     from ..models import IS_SQLITE
@@ -240,6 +249,7 @@ def get_dwell_time(
         try:
             result = _dwell_time_sql(db, connection_id)
             result["active_exposure"] = _active_exposure_sql(db, connection_id)
+            _DWELL_CACHE[connection_id] = (time.monotonic() + _DWELL_CACHE_TTL, result)
             return result
         except Exception as e:
             # Si el SQL nativo falla NO debe pasar en silencio (asi no se esconde un bug como el
@@ -282,7 +292,7 @@ def get_dwell_time(
         month = _coerce_datetime(resolved_at).strftime("%Y-%m")
         by_month.setdefault(month, []).append(days)
 
-    return {
+    result = {
         "metric": "dwell_time",
         "unit": "days",
         "connection_id": connection_id,
@@ -299,3 +309,5 @@ def get_dwell_time(
         "sla": _sla_from_day_lists(by_severity),
         "active_exposure": _active_exposure_python(db, connection_id),
     }
+    _DWELL_CACHE[connection_id] = (time.monotonic() + _DWELL_CACHE_TTL, result)
+    return result
