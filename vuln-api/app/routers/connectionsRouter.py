@@ -108,6 +108,22 @@ def delete_connection(
     conn = db.query(WazuhConnection).filter(WazuhConnection.id == conn_id).first()
     if not conn:
         raise HTTPException(status_code=404, detail=CONNECTION_NOT_FOUND)
+    
+    from ..models import WazuhVulnerability, VulnerabilityHistory, SyncRun
+    
+    # 1. Obtener IDs de vulnerabilidades y borrar su historial
+    vulns = db.query(WazuhVulnerability.id).filter(WazuhVulnerability.connection_id == conn_id).all()
+    vuln_ids = [v.id for v in vulns]
+    if vuln_ids:
+        db.query(VulnerabilityHistory).filter(VulnerabilityHistory.vulnerability_id.in_(vuln_ids)).delete(synchronize_session=False)
+
+    # 2. Borrar las vulnerabilidades
+    db.query(WazuhVulnerability).filter(WazuhVulnerability.connection_id == conn_id).delete(synchronize_session=False)
+    
+    # 3. Borrar los sync runs
+    db.query(SyncRun).filter(SyncRun.connection_id == conn_id).delete(synchronize_session=False)
+    
+    # 4. Borrar la conexion finalmente
     db.delete(conn)
     db.commit()
     return {"message": "Conexión eliminada"}
