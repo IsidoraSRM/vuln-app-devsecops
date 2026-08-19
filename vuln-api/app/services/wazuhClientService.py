@@ -86,7 +86,7 @@ def _build_session(wazuh_user: str, wazuh_password: str) -> requests.Session:
 def _scroll_start(
     session: requests.Session, indexer_url: str
 ) -> Tuple[Optional[str], List[Dict[str, Any]]]:
-    url = f"{indexer_url}/{VULN_INDEX}/_search?scroll={SCROLL_TTL}"
+    url = f"{indexer_url.rstrip('/')}/{VULN_INDEX}/_search?scroll={SCROLL_TTL}"
     # sort=_doc es el orden mas eficiente para scroll (no calcula scoring)
     body = {"size": BATCH_SIZE, "_source": VULN_SOURCE_FIELDS, "sort": ["_doc"]}
     resp = session.post(url, json=body, timeout=REQUEST_TIMEOUT)
@@ -99,7 +99,7 @@ def _scroll_start(
 def _scroll_next(
     session: requests.Session, indexer_url: str, scroll_id: str
 ) -> Tuple[Optional[str], List[Dict[str, Any]]]:
-    url = f"{indexer_url}/_search/scroll"
+    url = f"{indexer_url.rstrip('/')}/_search/scroll"
     body = {"scroll": SCROLL_TTL, "scroll_id": scroll_id}
     resp = session.post(url, json=body, timeout=REQUEST_TIMEOUT)
     resp.raise_for_status()
