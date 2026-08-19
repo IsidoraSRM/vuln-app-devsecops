@@ -27,6 +27,7 @@ configure_logging()
 log = logging.getLogger(__name__)
 
 Base.metadata.create_all(bind=engine)
+engine.dispose()
 
 def setup_timescaledb():
     db = SessionLocal()
