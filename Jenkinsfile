@@ -238,9 +238,9 @@ with open("docker-compose.dast.yml", "w") as f:
                     sh '''
                         ssh -o StrictHostKeyChecking=no vladhy_spiritualbo@10.194.0.3 "
                             cd ~/vuln-app-devsecops &&
-                            git pull origin main &&
-                            cp prod_config/docker-compose.app-only.yml docker-compose.app-only.yml 2>/dev/null || true &&
-                            docker compose -f docker-compose.app-only.yml up -d --build &&
+                            git fetch origin &&
+                            git reset --hard origin/main &&
+                            docker compose -f docker-compose.app-only.yml up -d --build --force-recreate &&
                             docker image prune -f
                         "
                     '''
