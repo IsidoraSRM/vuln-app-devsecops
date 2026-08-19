@@ -59,6 +59,7 @@ def setup_timescaledb():
         db.close()
 
 setup_timescaledb()
+engine.dispose()
 
 def setup_db_optimizations():
     db = SessionLocal()
@@ -157,6 +158,7 @@ def setup_db_optimizations():
         db.close()
 
 setup_db_optimizations()
+engine.dispose()
 
 def run_database_migrations():
     from .models import IS_SQLITE
@@ -175,6 +177,7 @@ def run_database_migrations():
             db.close()
 
 run_database_migrations()
+engine.dispose()
 
 def create_default_admin():
     db = SessionLocal()
