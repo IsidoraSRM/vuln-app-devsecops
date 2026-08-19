@@ -126,6 +126,16 @@ def delete_connection(
     # 4. Borrar la conexion finalmente
     db.delete(conn)
     db.commit()
+    
+    # 5. Refrescar vistas materializadas para actualizar los conteos cacheados
+    try:
+        from sqlalchemy.sql import text
+        db.execute(text("SELECT refresh_vulnerability_filters();"))
+        db.commit()
+    except Exception as e:
+        # Si falla el refresco por alguna razon (ej sqlite o DB incompleta), ignoramos
+        db.rollback()
+
     return {"message": "Conexión eliminada"}
 
 @router.post("/{conn_id}/test")
