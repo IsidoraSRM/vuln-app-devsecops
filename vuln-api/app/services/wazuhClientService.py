@@ -25,12 +25,14 @@ SCROLL_TTL = "2m"
 BATCH_SIZE = 10000
 REQUEST_TIMEOUT = 60
 
-# Pedimos del _source EXACTAMENTE las hojas que el sync lee (ver _process_pg_batch). Los docs
-# reales de Wazuh traen muchos campos que no usamos (wazuh.*, @timestamp, event.*, y hojas no
-# usadas dentro de vulnerability/package/agent como category, classification, ephemeral_id...);
-# pedir solo estas hojas reduce el payload de red y el parseo JSON en cada batch. La lista refleja
-# 1:1 los .get() de _process_pg_batch: pedir un campo extra no aportaria (el codigo no lo mira) y
-# omitir una hoja usada la dejaria en None. OpenSearch preserva la estructura anidada al filtrar.
+WAZUH_SSL_VERIFY = os.getenv("WAZUH_SSL_VERIFY", "False").lower() in ("true", "1", "yes")
+WAZUH_CA_PATH = os.getenv("WAZUH_CA_PATH", "")
+
+if WAZUH_SSL_VERIFY:
+    verify_param = WAZUH_CA_PATH if WAZUH_CA_PATH else True
+else:
+    verify_param = False
+
 VULN_SOURCE_FIELDS = [
     "agent.id", "agent.name",
     "host.os.full", "host.os.platform", "host.os.version",
@@ -76,7 +78,7 @@ with_retry = retry(
 def _build_session(wazuh_user: str, wazuh_password: str) -> requests.Session:
     session = requests.Session()
     session.auth = HTTPBasicAuth(wazuh_user, wazuh_password)
-    session.verify = False  # NOSONAR
+    session.verify = verify_param
     return session
 
 
@@ -130,7 +132,7 @@ def _safe_count(session: requests.Session, indexer_url: str) -> int:
     """Total de vulns (para calcular cada cuanto loguear el progreso). Si falla -> 0 = log por batch."""
     try:
         return _count_vulns(session, indexer_url)
-    except Exception:  # NOSONAR - best-effort; sin total, se cae a log por batch
+    except Exception:
         return 0
 
 
@@ -159,10 +161,7 @@ def _log_scroll_progress(batch_number: int, total: int, grand_total: int, last_l
 def _scroll_start_sliced(
     session: requests.Session, indexer_url: str, slice_id: int, slice_max: int
 ) -> Tuple[Optional[str], List[Dict[str, Any]]]:
-    # Igual que _scroll_start pero pidiendo solo una "slice" del scroll. OpenSearch reparte los
-    # docs entre slice_max slices DISJUNTAS (por hash de _id): la union de todas = todos los docs,
-    # sin solaparse. Asi K workers pueden traer K slices EN PARALELO. Con slice_max<2 no se
-    # agrega la clausula (equivale al scroll normal), para que slices=1 sea seguro.
+    
     url = f"{indexer_url}/{VULN_INDEX}/_search?scroll={SCROLL_TTL}"
     body: Dict[str, Any] = {"size": BATCH_SIZE, "_source": VULN_SOURCE_FIELDS, "sort": ["_doc"]}
     if slice_max >= 2:
@@ -193,7 +192,7 @@ def _put_blocking(q: "_queue.Queue", item: Any, stop: threading.Event) -> None:
             continue
 
 
-# Centinela que un worker pone en la cola para avisar que termino de recorrer su slice.
+
 _SLICE_DONE = object()
 
 
@@ -219,7 +218,7 @@ def _slice_worker(channel, indexer_url, wazuh_user, wazuh_password, slice_id, sl
             if channel.stop.is_set() or not scroll_id:
                 break
             scroll_id, hits = _scroll_next(session, indexer_url, scroll_id)
-    except Exception as exc:  # NOSONAR - se guarda y el generador lo re-lanza tras drenar
+    except Exception as exc:  
         channel.errors.append(exc)
     finally:
         if scroll_id:
@@ -292,7 +291,7 @@ def _iter_vulns_batches_parallel(
         )
 
     if channel.errors:
-        raise channel.errors[0]  # un slice que fallo = sync incompleto -> propagar (rollback en wazuhService)
+        raise channel.errors[0]  
 
 
 def iter_vulns_batches(
@@ -358,7 +357,7 @@ def _test_connection_request(indexer_url: str, wazuh_user: str, wazuh_password: 
     resp = requests.get(
         indexer_url,
         auth=HTTPBasicAuth(wazuh_user, wazuh_password),
-        verify=False,  # NOSONAR
+        verify=verify_param,
         timeout=10,
     )
     # 5xx triggerea retry via raise_for_status; 4xx no, son configuracion.
