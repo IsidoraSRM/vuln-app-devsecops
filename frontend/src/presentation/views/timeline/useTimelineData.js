@@ -95,6 +95,10 @@ export default function useTimelineData({
       if (historyItem.action === 'RESOLVED') {
         state = 'RESOLVED'
         resolvedAt = historyItem.timestamp
+      } else if (historyItem.action === 'AGENT_REMOVED') {
+        // El agente dejo de reportar (host dado de baja): estado terminal, NO es remediacion.
+        state = 'AGENT_REMOVED'
+        resolvedAt = null
       } else {
         state = 'ACTIVE'
         resolvedAt = null
@@ -136,7 +140,8 @@ export default function useTimelineData({
     details.forEach(vuln => {
       total += 1
       if (vuln.status === 'ACTIVE') pending += 1
-      else resolved += 1
+      else if (vuln.status === 'RESOLVED') resolved += 1
+      // AGENT_REMOVED (host dado de baja): fuera de pendientes y resueltos, no es una remediacion.
     })
 
     const snapshot = { total, pending, resolved, details }
@@ -160,7 +165,7 @@ export default function useTimelineData({
       const historyMs = new Date(historyItem.timestamp).getTime()
       if (Number.isNaN(historyMs) || historyMs < startMs || historyMs > endMs) continue
 
-      if (['DETECTED', 'REOPENED', 'RESOLVED'].includes(historyItem.action)) {
+      if (['DETECTED', 'REOPENED', 'RESOLVED', 'AGENT_REMOVED'].includes(historyItem.action)) {
         candidates.push({
           at: historyItem.timestamp,
           label: historyItem.action,

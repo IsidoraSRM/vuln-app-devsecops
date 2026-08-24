@@ -486,12 +486,32 @@ def test_vuln_resolved_when_absent_from_payload(mock_fetch, mock_session_local, 
     conn = _create_connection(db_session)
     headers = _get_headers(client)
     client.post(f"/wazuh-connections/{conn.id}/sync", headers=headers)
-    mock_fetch.return_value = []
+    # El agente 001 SIGUE reportando (otra vuln), pero la original desaparece -> parche -> RESOLVED.
+    mock_fetch.return_value = [_raw_vuln(cve="CVE-2023-0001")]
     import time
     time.sleep(1.1)
     client.post(f"/wazuh-connections/{conn.id}/sync", headers=headers)
-    vuln = db_session.query(WazuhVulnerability).first()
+    vuln = db_session.query(WazuhVulnerability).filter_by(cve_id="CVE-2023-9999").first()
     assert vuln.status == "RESOLVED"
+
+
+@patch("app.services.wazuhService.SessionLocal")
+@patch("app.services.wazuhProvider.WazuhVulnerabilityProvider.fetch_vulnerabilities_batches")
+def test_vuln_agent_removed_when_agent_stops_reporting(mock_fetch, mock_session_local, client, db_session):
+    """Si el agente deja de reportar TODO (payload vacio) -> AGENT_REMOVED, no RESOLVED."""
+    db_session.close = lambda: None
+    mock_session_local.return_value = db_session
+    mock_fetch.return_value = [_raw_vuln()]
+    _create_user(db_session)
+    conn = _create_connection(db_session)
+    headers = _get_headers(client)
+    client.post(f"/wazuh-connections/{conn.id}/sync", headers=headers)
+    mock_fetch.return_value = []  # el agente no reporta nada -> host dado de baja
+    import time
+    time.sleep(1.1)
+    client.post(f"/wazuh-connections/{conn.id}/sync", headers=headers)
+    vuln = db_session.query(WazuhVulnerability).filter_by(cve_id="CVE-2023-9999").first()
+    assert vuln.status == "AGENT_REMOVED"
 
 
 @patch("app.services.wazuhService.SessionLocal")

@@ -43,7 +43,7 @@
               <td>{{ vuln.detected_at ? fmtDateTime(vuln.detected_at) : '-' }}</td>
               <td>{{ fmtDateTime(vuln.first_seen) }}</td>
               <td>{{ vuln.last_seen ? fmtDateTime(vuln.last_seen) : '-' }}</td>
-              <td>{{ vuln.status === 'ACTIVE' ? 'ACTIVO' : 'RESUELTO' }}</td>
+              <td>{{ vuln.status === 'ACTIVE' ? 'ACTIVO' : (vuln.status === 'AGENT_REMOVED' ? 'HOST DADO DE BAJA' : 'RESUELTO') }}</td>
               <td>{{ vuln.resolved_at ? fmtDateTime(vuln.resolved_at) : '-' }}</td>
             </tr>
             <tr v-if="rows.length === 0"><td colspan="10" class="empty-row">Sin coincidencias</td></tr>

@@ -69,9 +69,12 @@ LANGUAGE sql STABLE AS $$
     FROM wazuh_vulnerabilities v
     WHERE
         (p_severities IS NULL OR array_length(p_severities, 1) IS NULL OR UPPER(v.severity) = ANY(SELECT UPPER(unnest) FROM unnest(p_severities)))
-        AND (p_os_platforms IS NULL OR array_length(p_os_platforms, 1) IS NULL OR EXISTS (SELECT 1 FROM unnest(p_os_platforms) p WHERE v.os_platform ILIKE '%' || p || '%'))
+        -- os_platform y agent_name: coincidencia EXACTA (= ANY) en vez de ILIKE '%x%'. El frontend
+        -- manda valores exactos (checkbox/dropdown), y el '%' al inicio inutilizaba idx_vuln_os_platform
+        -- e idx_vuln_agent_name -> seq scan de millones. Con = ANY el planner usa el indice (11s -> 90ms a 4M).
+        AND (p_os_platforms IS NULL OR array_length(p_os_platforms, 1) IS NULL OR v.os_platform = ANY(p_os_platforms))
         AND (p_statuses IS NULL OR array_length(p_statuses, 1) IS NULL OR UPPER(v.status) = ANY(SELECT UPPER(unnest) FROM unnest(p_statuses)))
-        AND (p_agent_names IS NULL OR array_length(p_agent_names, 1) IS NULL OR EXISTS (SELECT 1 FROM unnest(p_agent_names) a WHERE v.agent_name ILIKE '%' || a || '%'))
+        AND (p_agent_names IS NULL OR array_length(p_agent_names, 1) IS NULL OR v.agent_name = ANY(p_agent_names))
         AND (p_days_ago IS NULL OR v.first_seen >= CURRENT_DATE - (p_days_ago || ' days')::interval);
 $$;
 
