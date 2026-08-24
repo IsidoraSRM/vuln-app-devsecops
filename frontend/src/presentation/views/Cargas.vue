@@ -197,7 +197,7 @@
           </div>
         </div>
 
-        <div class="f-group">
+        <div class="f-group date-group">
           <label>Fecha Detección</label>
           <div class="range-inputs">
             <input type="date" v-model="detectedAfter" @change="triggerFilterChange" class="filter-input-sm" title="Desde">
@@ -953,15 +953,16 @@ th { cursor: pointer; }
 .btn-clear-filters:hover { background-color: var(--bg-hover); border-color: var(--danger); color: var(--danger); }
 .pagination-ellipsis { display: inline-flex; align-items: center; justify-content: center; min-width: 20px; color: var(--text-muted); font-size: 0.8rem; font-weight: 600; }
 .filter-panel { padding: 0; margin-bottom: 1.5rem; overflow: visible; }
-.filter-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); align-items: center; }
-.f-group { display: flex; flex-direction: column; padding: 1rem 1.2rem; border-right: 1px solid var(--border); }
+.filter-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); align-items: center; }
+.f-group { display: flex; flex-direction: column; padding: 1rem 1.2rem; border-right: 1px solid var(--border); border-bottom: 1px solid var(--border); }
+.f-group.date-group { grid-column: span 2; }
 .f-group:last-child { border-right: none; }
 .f-group label { font-size: 0.7rem; font-weight: 700; color: var(--text-muted); text-transform: uppercase; margin-bottom: 0.5rem; }
 .filter-input, .dd-btn { width: 100%; padding: 0.55rem 0.8rem; border: 1px solid var(--border); background: var(--bg-dark); border-radius: var(--radius-sm); color: var(--text-main); cursor: pointer; font-size: 0.85rem; }
 .filter-input:disabled, .dd-btn:disabled { opacity: 0.5; cursor: not-allowed; }
-.filter-input-sm { width: 100%; padding: 0.45rem 0.6rem; border: 1px solid var(--border); background: var(--bg-dark); border-radius: var(--radius-sm); color: var(--text-main); font-size: 0.8rem; }
-.range-inputs { display: flex; align-items: center; gap: 0.4rem; }
+.range-inputs { display: flex; flex-wrap: nowrap; align-items: center; gap: 0.4rem; }
 .range-inputs span { color: var(--text-muted); font-weight: 600; }
+.filter-input-sm { flex: 1; min-width: 80px; padding: 0.45rem 0.6rem; border: 1px solid var(--border); background: var(--bg-dark); border-radius: var(--radius-sm); color: var(--text-main); font-size: 0.8rem; }
 .popover-wrap { position: relative; }
 .dd-btn { display: flex; justify-content: space-between; }
 .dd-panel { position: absolute; top: calc(100% + 6px); left: 0; width: 280px; border: 1px solid var(--border); border-radius: var(--radius-md); background: var(--bg-panel); z-index: 20; overflow: hidden; box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15); }
@@ -977,8 +978,8 @@ th { cursor: pointer; }
 .badge-high { background: rgba(234, 88, 12, 0.15); color: #ea580c; }
 .badge-medium { background: rgba(234, 179, 8, 0.15); color: #eab308; }
 .badge-low { background: rgba(59, 130, 246, 0.15); color: #3b82f6; }
-@media (max-width: 1400px) { .filter-row { grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); } }
-@media (max-width: 1100px) { .filter-row { grid-template-columns: 1fr 1fr; } .f-group { border-right: none; border-bottom: 1px solid var(--border); } }
+@media (max-width: 1600px) { .filter-row { grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); } }
+@media (max-width: 1200px) { .filter-row { grid-template-columns: 1fr 1fr; } .f-group { border-right: none; } }
 
 /* Cargas Pagination Styles */
 .cargas-pagination-bar {

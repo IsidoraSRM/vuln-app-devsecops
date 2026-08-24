@@ -39,7 +39,7 @@ def perform_sync_task(conn_id: int, username: str):
         count = 0
         if IS_SQLITE:
             for raw_vulns in batches:
-                count += _process_sqlite(db, conn.id, raw_vulns)
+                count += _process_sqlite(db, conn.id, raw_vulns, db_sync_time)
             _mark_obsolete_sqlite(db, conn.id, db_sync_time)
         else:
             _prepare_pg_temp_table(db)
@@ -49,7 +49,7 @@ def perform_sync_task(conn_id: int, username: str):
             # a autovacuum. La temp table es ON COMMIT PRESERVE ROWS -> sobrevive los commits. Y
             # db_sync_time se capturo ANTES del loop, asi que _mark_obsolete_pg sigue correcto.
             for i, raw_vulns in enumerate(batches):
-                count += _process_pg_batch(db, conn.id, raw_vulns)
+                count += _process_pg_batch(db, conn.id, raw_vulns, db_sync_time)
                 if (i + 1) % SYNC_COMMIT_EVERY_N_BATCHES == 0:
                     db.commit()
             _mark_obsolete_pg(db, conn.id, db_sync_time)
@@ -106,7 +106,7 @@ def _prepare_pg_temp_table(db: Session):
     """))
 
 
-def _process_pg_batch(db: Session, conn_id: int, raw_vulns: list) -> int:
+def _process_pg_batch(db: Session, conn_id: int, raw_vulns: list, sync_start_time) -> int:
     if not raw_vulns:
         return 0
         
@@ -194,7 +194,7 @@ def _process_pg_batch(db: Session, conn_id: int, raw_vulns: list) -> int:
     # 1. Insert history for reopened
     db.execute(text("""
         INSERT INTO vulnerability_history (vulnerability_id, action, details, timestamp)
-        SELECT w.id, 'REOPENED', 'La vulnerabilidad fue detectada nuevamente por Wazuh', CURRENT_TIMESTAMP
+        SELECT w.id, 'REOPENED', 'La vulnerabilidad fue detectada nuevamente por Wazuh', :sync_start
         FROM temp_wazuh_vulns t
         JOIN wazuh_vulnerabilities w 
           ON t.connection_id = w.connection_id
@@ -203,12 +203,12 @@ def _process_pg_batch(db: Session, conn_id: int, raw_vulns: list) -> int:
          AND t.package_version = w.package_version 
          AND t.cve_id = w.cve_id
         WHERE w.status = 'RESOLVED';
-    """))
+    """), {"sync_start": sync_start_time})
     
     # 2. Insert history for severity change
     db.execute(text("""
         INSERT INTO vulnerability_history (vulnerability_id, action, details, timestamp)
-        SELECT w.id, 'SEVERITY_CHANGED', 'Severidad cambió de ' || COALESCE(w.severity, 'N/A') || ' a ' || t.severity, CURRENT_TIMESTAMP
+        SELECT w.id, 'SEVERITY_CHANGED', 'Severidad cambió de ' || COALESCE(w.severity, 'N/A') || ' a ' || t.severity, :sync_start
         FROM temp_wazuh_vulns t
         JOIN wazuh_vulnerabilities w 
           ON t.connection_id = w.connection_id
@@ -217,7 +217,7 @@ def _process_pg_batch(db: Session, conn_id: int, raw_vulns: list) -> int:
          AND t.package_version = w.package_version 
          AND t.cve_id = w.cve_id
         WHERE w.severity IS DISTINCT FROM t.severity;
-    """))
+    """), {"sync_start": sync_start_time})
 
     # 3. UPSERT the actual data and capture new inserts using xmax
     db.execute(text("""
@@ -231,7 +231,7 @@ def _process_pg_batch(db: Session, conn_id: int, raw_vulns: list) -> int:
             SELECT connection_id, status, agent_id, agent_name, os_full, os_platform, os_version,
                    package_name, package_version, package_type, package_arch, cve_id,
                    severity, score_base, score_version, detected_at, published_at,
-                   description, reference, scanner_vendor, CURRENT_TIMESTAMP
+                   description, reference, scanner_vendor, :sync_start
             FROM temp_wazuh_vulns
             ON CONFLICT ON CONSTRAINT uniq_wazuh_vuln
             DO UPDATE SET
@@ -250,14 +250,14 @@ def _process_pg_batch(db: Session, conn_id: int, raw_vulns: list) -> int:
                 description = EXCLUDED.description,
                 reference = EXCLUDED.reference,
                 scanner_vendor = EXCLUDED.scanner_vendor,
-                last_seen = CURRENT_TIMESTAMP
+                last_seen = :sync_start
             RETURNING id, xmax
         )
         INSERT INTO vulnerability_history (vulnerability_id, action, details, timestamp)
-        SELECT id, 'DETECTED', 'Vulnerabilidad identificada por primera vez', CURRENT_TIMESTAMP
+        SELECT id, 'DETECTED', 'Vulnerabilidad identificada por primera vez', :sync_start
         FROM upsert
         WHERE xmax::text = '0';
-    """))
+    """), {"sync_start": sync_start_time})
     
     return len(values)
 
@@ -265,7 +265,7 @@ def _mark_obsolete_pg(db: Session, conn_id: int, sync_start_time):
     # Insert history for newly resolved
     db.execute(text("""
         INSERT INTO vulnerability_history (vulnerability_id, action, details, timestamp)
-        SELECT id, 'RESOLVED', 'Ya no es reportada por el agente (Probablemente parcheada)', CURRENT_TIMESTAMP
+        SELECT id, 'RESOLVED', 'Ya no es reportada por el agente (Probablemente parcheada)', :sync_start
         FROM wazuh_vulnerabilities
         WHERE connection_id = :conn_id 
           AND status = 'ACTIVE' 
@@ -282,7 +282,7 @@ def _mark_obsolete_pg(db: Session, conn_id: int, sync_start_time):
     """), {"conn_id": conn_id, "sync_start": sync_start_time})
 
 # Original memory-intensive code for SQLite backward compatibility
-def _process_sqlite(db: Session, conn_id: int, raw_vulns: list) -> int:
+def _process_sqlite(db: Session, conn_id: int, raw_vulns: list, sync_start_time) -> int:
     count = 0
     all_db_vulns = db.query(WazuhVulnerability).filter_by(connection_id=conn_id).all()
     vuln_map = { (v.agent_id, v.package_name, v.package_version, v.cve_id): v for v in all_db_vulns }
@@ -309,9 +309,9 @@ def _process_sqlite(db: Session, conn_id: int, raw_vulns: list) -> int:
         
         existing = vuln_map.get(key)
         if existing:
-            _handle_existing_vuln_in_memory(existing, vuln)
+            _handle_existing_vuln_in_memory(existing, vuln, sync_start_time)
         else:
-            new_vuln = _create_new_vuln_in_memory(conn_id, agent, osinfo, pkg, vuln)
+            new_vuln = _create_new_vuln_in_memory(conn_id, agent, osinfo, pkg, vuln, sync_start_time)
             db.add(new_vuln)
             vuln_map[key] = new_vuln 
         count += 1
@@ -330,14 +330,16 @@ def _mark_obsolete_sqlite(db: Session, conn_id: int, sync_start_time):
         db_vuln.history.append(VulnerabilityHistory(
             action="RESOLVED",
             details="Ya no es reportada por el agente (Probablemente parcheada)",
+            timestamp=sync_start_time
         ))
 
-def _handle_existing_vuln_in_memory(existing: WazuhVulnerability, vuln: dict) -> None:
+def _handle_existing_vuln_in_memory(existing: WazuhVulnerability, vuln: dict, sync_start_time) -> None:
     if existing.status == "RESOLVED":
         existing.status = "ACTIVE"
         existing.history.append(VulnerabilityHistory(
             action="REOPENED",
             details="La vulnerabilidad fue detectada nuevamente por Wazuh",
+            timestamp=sync_start_time
         ))
 
     new_severity = vuln.get("severity")
@@ -345,14 +347,15 @@ def _handle_existing_vuln_in_memory(existing: WazuhVulnerability, vuln: dict) ->
         existing.history.append(VulnerabilityHistory(
             action="SEVERITY_CHANGED",
             details=f"Severidad cambió de {existing.severity} a {new_severity}",
+            timestamp=sync_start_time
         ))
         existing.severity = new_severity
 
     existing.score_base = (vuln.get("score") or {}).get("base")
-    existing.last_seen = func.now()
+    existing.last_seen = sync_start_time
 
 
-def _create_new_vuln_in_memory(conn_id, agent, osinfo, pkg, vuln):
+def _create_new_vuln_in_memory(conn_id, agent, osinfo, pkg, vuln, sync_start_time):
     new_v = WazuhVulnerability(
         connection_id=conn_id,
         status="ACTIVE",
@@ -374,10 +377,13 @@ def _create_new_vuln_in_memory(conn_id, agent, osinfo, pkg, vuln):
         description=vuln.get("description"),
         reference=vuln.get("reference"),
         scanner_vendor=(vuln.get("scanner") or {}).get("vendor"),
+        first_seen=sync_start_time,
+        last_seen=sync_start_time
     )
     new_v.history.append(VulnerabilityHistory(
         action="DETECTED",
         details="Vulnerabilidad identificada por primera vez",
+        timestamp=sync_start_time
     ))
     VULN_DETECTED.inc()
     return new_v
