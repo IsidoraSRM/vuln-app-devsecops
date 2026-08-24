@@ -178,40 +178,45 @@
         </div>
 
         <div class="f-group popover-wrap" v-click-outside="() => (dropdowns.os = false)">
-          <label id="lbl-os">Sistema Operativo</label>
-          <button type="button" aria-labelledby="lbl-os" class="filter-input dd-btn" @click="dropdowns.os = !dropdowns.os" :disabled="!osOptions.length">
+          <label for="btn-os">Sistema Operativo</label>
+          <button id="btn-os" type="button" class="filter-input dd-btn" @click="dropdowns.os = !dropdowns.os" :disabled="!osOptions.length">
             <span>{{ selectedOS.length ? selectedOS.length + ' sel.' : 'Todos' }}</span>
             <span>▼</span>
           </button>
           <div v-if="dropdowns.os" class="dd-panel fade-in">
-            <input type="text" v-model="search.os" aria-label="Buscar Sistema Operativo" placeholder="Buscar SO..." class="dd-search">
+            <label for="search-os" style="display:none;">Buscar Sistema Operativo</label>
+            <input id="search-os" type="text" v-model="search.os" placeholder="Buscar SO..." class="dd-search">
             <div class="dd-actions">
               <span @click="selectedOS = [...osOptions]; fetchVulns();">Todos</span>
               <span @click="selectedOS = []; fetchVulns();">Limpiar</span>
             </div>
             <div class="dd-list custom-scroll">
-              <label v-for="os in filteredOS" :key="os" class="dd-item">
-                <input type="checkbox" :value="os" v-model="selectedOS" @change="triggerFilterChange"> {{ os }}
+              <label v-for="os in filteredOS" :key="os" :for="'chk-os-' + os" class="dd-item">
+                <input :id="'chk-os-' + os" type="checkbox" :value="os" v-model="selectedOS" @change="triggerFilterChange"> {{ os }}
               </label>
             </div>
           </div>
         </div>
 
         <div class="f-group date-group">
-          <label id="lbl-fecha">Fecha Detección</label>
-          <div class="range-inputs" aria-labelledby="lbl-fecha">
-            <input type="date" aria-label="Fecha de detección desde" v-model="detectedAfter" @change="triggerFilterChange" class="filter-input-sm" title="Desde">
+          <span class="f-label">Fecha Detección</span>
+          <div class="range-inputs">
+            <label for="date-after" style="display:none;">Desde</label>
+            <input id="date-after" type="date" v-model="detectedAfter" @change="triggerFilterChange" class="filter-input-sm" title="Desde">
             <span>-</span>
-            <input type="date" aria-label="Fecha de detección hasta" v-model="detectedBefore" @change="triggerFilterChange" class="filter-input-sm" title="Hasta">
+            <label for="date-before" style="display:none;">Hasta</label>
+            <input id="date-before" type="date" v-model="detectedBefore" @change="triggerFilterChange" class="filter-input-sm" title="Hasta">
           </div>
         </div>
 
         <div class="f-group">
-          <label id="lbl-cvss">Score CVSS (Base)</label>
-          <div class="range-inputs" aria-labelledby="lbl-cvss">
-            <input type="number" aria-label="Score CVSS Mínimo" v-model.number="scoreMin" @input="triggerFilterChange" min="0" max="10" step="0.1" placeholder="Min" class="filter-input-sm">
+          <span class="f-label">Score CVSS (Base)</span>
+          <div class="range-inputs">
+            <label for="cvss-min" style="display:none;">Mínimo</label>
+            <input id="cvss-min" type="number" v-model.number="scoreMin" @input="triggerFilterChange" min="0" max="10" step="0.1" placeholder="Min" class="filter-input-sm">
             <span>-</span>
-            <input type="number" aria-label="Score CVSS Máximo" v-model.number="scoreMax" @input="triggerFilterChange" min="0" max="10" step="0.1" placeholder="Max" class="filter-input-sm">
+            <label for="cvss-max" style="display:none;">Máximo</label>
+            <input id="cvss-max" type="number" v-model.number="scoreMax" @input="triggerFilterChange" min="0" max="10" step="0.1" placeholder="Max" class="filter-input-sm">
           </div>
         </div>
       </div>
@@ -960,7 +965,7 @@ th { cursor: pointer; }
 .f-group { display: flex; flex-direction: column; padding: 1rem 1.2rem; border-right: 1px solid var(--border); border-bottom: 1px solid var(--border); }
 .f-group.date-group { grid-column: span 2; }
 .f-group:last-child { border-right: none; }
-.f-group label { font-size: 0.7rem; font-weight: 700; color: var(--text-muted); text-transform: uppercase; margin-bottom: 0.5rem; }
+.f-group label, .f-group .f-label { display: block; font-size: 0.7rem; font-weight: 700; color: var(--text-muted); text-transform: uppercase; margin-bottom: 0.5rem; }
 .filter-input, .dd-btn { width: 100%; padding: 0.55rem 0.8rem; border: 1px solid var(--border); background: var(--bg-dark); border-radius: var(--radius-sm); color: var(--text-main); cursor: pointer; font-size: 0.85rem; }
 .filter-input:disabled, .dd-btn:disabled { opacity: 0.5; cursor: not-allowed; }
 .range-inputs { display: flex; flex-wrap: nowrap; align-items: center; gap: 0.4rem; }
