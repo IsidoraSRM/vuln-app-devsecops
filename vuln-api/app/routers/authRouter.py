@@ -11,7 +11,7 @@ from ..schemas.authSchema import ChangePasswordRequest
 from ..services.authService import validate_strong_password
 
 router = APIRouter(prefix="/auth", tags=["auth"])
-
+#hola
 @router.post("/login")
 def login(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depends(get_db)):
     LOGIN_ATTEMPTS.inc()
