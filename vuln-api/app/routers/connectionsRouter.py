@@ -132,7 +132,7 @@ def delete_connection(
         from sqlalchemy.sql import text
         db.execute(text("SELECT refresh_vulnerability_filters();"))
         db.commit()
-    except Exception:
+    except Exception as e:
         # Si falla el refresco por alguna razon (ej sqlite o DB incompleta), ignoramos
         db.rollback()
 
