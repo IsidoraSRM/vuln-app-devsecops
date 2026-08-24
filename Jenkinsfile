@@ -161,7 +161,7 @@ pipeline {
                         # 2. Modificar el archivo docker-compose dinámicamente usando Python
                         # Esto elimina 'container_name' y 'ports' para evitar conflictos de nombres y puertos con los contenedores permanentes del host.
                         python3 -c '
-with open("docker-compose.yml") as f:
+with open("prod_config/docker-compose.nodomain.yml") as f:
     lines = f.readlines()
 out = []
 skip_ports = False
