@@ -339,7 +339,14 @@
                   {{ (vuln.severity || 'UNKNOWN').toUpperCase() }}
                 </span>
               </td>
-              <td class="font-medium text-black">{{ vuln.cve_id || 'N/A' }}</td>
+              <td class="font-medium text-black">
+                {{ vuln.cve_id || 'N/A' }}
+                <span v-if="vuln.status && vuln.status !== 'ACTIVE'"
+                      class="status-chip"
+                      :class="vuln.status === 'AGENT_REMOVED' ? 'st-removed' : 'st-resolved'">
+                  {{ vuln.status === 'AGENT_REMOVED' ? 'Host dado de baja' : 'Resuelta' }}
+                </span>
+              </td>
               <template v-if="cargasHeaders.length > 0">
                 <td v-for="header in cargasHeaders" :key="header.index" style="text-align: center;">
                   <div class="cargas-evolution-cell">
@@ -982,6 +989,9 @@ th { cursor: pointer; }
 .dd-item { display: flex; gap: 0.6rem; padding: 0.5rem 0.9rem; font-size: 0.82rem; cursor: pointer; align-items: center; }
 .dd-item:hover { background: var(--bg-hover); }
 .badge-mini { padding: 0.15rem 0.5rem; border-radius: 4px; font-size: 0.7rem; font-weight: 700; text-transform: uppercase; }
+.status-chip { display: inline-block; margin-left: 0.5rem; padding: 0.1rem 0.45rem; border-radius: 999px; font-size: 0.68rem; font-weight: 700; vertical-align: middle; white-space: nowrap; }
+.st-removed { background: #fef3c7; color: #92400e; border: 1px solid #fcd34d; }
+.st-resolved { background: #dcfce7; color: #166534; border: 1px solid #86efac; }
 .badge-critical { background: rgba(220, 38, 38, 0.15); color: #dc2626; }
 .badge-high { background: rgba(234, 88, 12, 0.15); color: #ea580c; }
 .badge-medium { background: rgba(234, 179, 8, 0.15); color: #eab308; }

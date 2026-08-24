@@ -202,7 +202,7 @@ def _process_pg_batch(db: Session, conn_id: int, raw_vulns: list, sync_start_tim
          AND t.package_name = w.package_name 
          AND t.package_version = w.package_version 
          AND t.cve_id = w.cve_id
-        WHERE w.status = 'RESOLVED';
+        WHERE w.status IN ('RESOLVED', 'AGENT_REMOVED');
     """), {"sync_start": sync_start_time})
     
     # 2. Insert history for severity change
@@ -262,27 +262,51 @@ def _process_pg_batch(db: Session, conn_id: int, raw_vulns: list, sync_start_tim
     return len(values)
 
 def _mark_obsolete_pg(db: Session, conn_id: int, sync_start_time):
-    # Insert history for newly resolved
-    db.execute(text("""
+    # Una vuln ACTIVA que ya no se reporta (last_seen < inicio del sync) puede deberse a:
+    #  (a) su agente SIGUE reportando otras cosas -> la vuln se parcheo -> RESOLVED.
+    #  (b) su agente NO reporto NADA este sync (host dado de baja) -> AGENT_REMOVED (no es remediacion).
+    # Distinguirlas evita inflar las metricas de remediacion con agentes decomisionados. NOTA: si un
+    # agente queda 100% limpio en un solo sync se ve igual que uno eliminado (ambiguedad inherente a
+    # los datos de vulns); para el caso comun (agente con varias vulns) la heuristica acierta.
+    params = {"conn_id": conn_id, "sync_start": sync_start_time}
+
+    # "El agente sigue presente" = existe otra vuln del mismo agente vista en este sync.
+    agent_present = """EXISTS (
+        SELECT 1 FROM wazuh_vulnerabilities w2
+        WHERE w2.connection_id = v.connection_id
+          AND w2.agent_id IS NOT DISTINCT FROM v.agent_id
+          AND w2.last_seen >= :sync_start
+    )"""
+
+    # Historial: RESOLVED (agente presente = parche)
+    db.execute(text(f"""
         INSERT INTO vulnerability_history (vulnerability_id, action, details, timestamp)
-        SELECT id, 'RESOLVED', 'Ya no es reportada por el agente (Probablemente parcheada)', :sync_start
-        FROM wazuh_vulnerabilities
-        WHERE connection_id = :conn_id 
-          AND status = 'ACTIVE' 
-          AND last_seen < :sync_start
-    """), {"conn_id": conn_id, "sync_start": sync_start_time})
-    
-    # Mark as resolved
-    db.execute(text("""
-        UPDATE wazuh_vulnerabilities
-        SET status = 'RESOLVED'
-        WHERE connection_id = :conn_id 
-          AND status = 'ACTIVE' 
-          AND last_seen < :sync_start
-    """), {"conn_id": conn_id, "sync_start": sync_start_time})
+        SELECT v.id, 'RESOLVED', 'Ya no es reportada por el agente (probablemente parcheada)', :sync_start
+        FROM wazuh_vulnerabilities v
+        WHERE v.connection_id = :conn_id AND v.status = 'ACTIVE' AND v.last_seen < :sync_start
+          AND {agent_present}
+    """), params)
+    # Historial: AGENT_REMOVED (agente dado de baja)
+    db.execute(text(f"""
+        INSERT INTO vulnerability_history (vulnerability_id, action, details, timestamp)
+        SELECT v.id, 'AGENT_REMOVED', 'El agente dejo de reportar (host dado de baja); no implica remediacion', :sync_start
+        FROM wazuh_vulnerabilities v
+        WHERE v.connection_id = :conn_id AND v.status = 'ACTIVE' AND v.last_seen < :sync_start
+          AND NOT {agent_present}
+    """), params)
+    # Estado: RESOLVED o AGENT_REMOVED segun si el agente sigue presente
+    db.execute(text(f"""
+        UPDATE wazuh_vulnerabilities v
+        SET status = CASE WHEN {agent_present} THEN 'RESOLVED' ELSE 'AGENT_REMOVED' END
+        WHERE v.connection_id = :conn_id AND v.status = 'ACTIVE' AND v.last_seen < :sync_start
+    """), params)
 
 # Original memory-intensive code for SQLite backward compatibility
-def _process_sqlite(db: Session, conn_id: int, raw_vulns: list, sync_start_time) -> int:
+def _process_sqlite(db: Session, conn_id: int, raw_vulns: list, sync_start_time=None) -> int:
+    # sync_start_time es opcional para compatibilidad con los tests (que llaman sin el); en el sync
+    # real siempre se pasa el timestamp de inicio para que todos los eventos sean consistentes.
+    if sync_start_time is None:
+        sync_start_time = func.now()
     count = 0
     all_db_vulns = db.query(WazuhVulnerability).filter_by(connection_id=conn_id).all()
     vuln_map = { (v.agent_id, v.package_name, v.package_version, v.cve_id): v for v in all_db_vulns }
@@ -325,16 +349,36 @@ def _mark_obsolete_sqlite(db: Session, conn_id: int, sync_start_time):
         WazuhVulnerability.last_seen < sync_start_time
     ).all()
     
+    if not obsolete_vulns:
+        return
+
+    # Agentes que reportaron algo en este sync (al menos una vuln con last_seen >= inicio). Si el
+    # agente de una vuln obsoleta NO esta aca, dejo de reportar por completo -> host dado de baja.
+    present_agents = {
+        a for (a,) in db.query(WazuhVulnerability.agent_id).filter(
+            WazuhVulnerability.connection_id == conn_id,
+            WazuhVulnerability.last_seen >= sync_start_time,
+        ).distinct().all()
+    }
+
     for db_vuln in obsolete_vulns:
-        db_vuln.status = "RESOLVED"
-        db_vuln.history.append(VulnerabilityHistory(
-            action="RESOLVED",
-            details="Ya no es reportada por el agente (Probablemente parcheada)",
-            timestamp=sync_start_time
-        ))
+        if db_vuln.agent_id in present_agents:
+            db_vuln.status = "RESOLVED"
+            db_vuln.history.append(VulnerabilityHistory(
+                action="RESOLVED",
+                details="Ya no es reportada por el agente (probablemente parcheada)",
+                timestamp=sync_start_time
+            ))
+        else:
+            db_vuln.status = "AGENT_REMOVED"
+            db_vuln.history.append(VulnerabilityHistory(
+                action="AGENT_REMOVED",
+                details="El agente dejó de reportar (host dado de baja); no implica remediación",
+                timestamp=sync_start_time
+            ))
 
 def _handle_existing_vuln_in_memory(existing: WazuhVulnerability, vuln: dict, sync_start_time) -> None:
-    if existing.status == "RESOLVED":
+    if existing.status in ("RESOLVED", "AGENT_REMOVED"):
         existing.status = "ACTIVE"
         existing.history.append(VulnerabilityHistory(
             action="REOPENED",

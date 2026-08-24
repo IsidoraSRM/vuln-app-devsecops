@@ -254,7 +254,14 @@
               <td class="font-medium score-cell">
                 {{ vuln.score_base != null ? vuln.score_base.toFixed(1) : 'N/A' }}
               </td>
-              <td class="font-medium text-black">{{ vuln.cve_id || 'N/A' }}</td>
+              <td class="font-medium text-black">
+                {{ vuln.cve_id || 'N/A' }}
+                <span v-if="vuln.status && vuln.status !== 'ACTIVE'"
+                      class="status-chip"
+                      :class="vuln.status === 'AGENT_REMOVED' ? 'st-removed' : 'st-resolved'">
+                  {{ vuln.status === 'AGENT_REMOVED' ? 'Host dado de baja' : 'Resuelta' }}
+                </span>
+              </td>
               <td>
                 <div class="agent-info">
                   <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="4" width="16" height="16" rx="2" ry="2"></rect><rect x="9" y="9" width="6" height="6"></rect><line x1="9" y1="1" x2="9" y2="4"></line><line x1="15" y1="1" x2="15" y2="4"></line><line x1="9" y1="20" x2="9" y2="23"></line><line x1="15" y1="20" x2="15" y2="23"></line><line x1="20" y1="9" x2="23" y2="9"></line><line x1="20" y1="14" x2="23" y2="14"></line><line x1="1" y1="9" x2="4" y2="9"></line><line x1="1" y1="14" x2="4" y2="14"></line></svg>
@@ -658,6 +665,9 @@ th { cursor: pointer; }
 .package-info { display: flex; flex-direction: column; }
 .pkg-name { color: var(--text-main); font-weight: 500; }
 .pkg-version { color: var(--text-muted); font-size: 0.8rem; }
+.status-chip { display: inline-block; margin-left: 0.5rem; padding: 0.1rem 0.45rem; border-radius: 999px; font-size: 0.68rem; font-weight: 700; vertical-align: middle; white-space: nowrap; }
+.st-removed { background: #fef3c7; color: #92400e; border: 1px solid #fcd34d; }
+.st-resolved { background: #dcfce7; color: #166534; border: 1px solid #86efac; }
 .alert { padding: 1rem; border-radius: var(--radius-sm); margin-bottom: 1.5rem; font-size: 0.9rem; display: flex; align-items: center; gap: 0.5rem; font-weight: 500; }
 .alert-danger { color: var(--danger); background-color: var(--danger-bg); border: 1px solid rgba(239, 68, 68, 0.3); }
 .pagination-header { display: flex; justify-content: space-between; align-items: center; padding: 1rem 1.5rem; border-bottom: 1px solid var(--border); background-color: var(--bg-panel); }

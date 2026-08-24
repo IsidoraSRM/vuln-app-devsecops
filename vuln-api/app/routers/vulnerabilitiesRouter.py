@@ -167,7 +167,13 @@ def list_vulns(
             db.rollback()
             total_count = None
     if total_count is None:
-        total_count = query.count()
+        # Cap del conteo en vivo (filtros avanzados que no cubre la MV). Contar el total EXACTO de un
+        # filtro que matchea 1M+ filas costaba ~3.5s a 4M; el SELECT de la pagina es rapido (para en
+        # 500). Contamos solo hasta COUNT_CAP -> el front muestra "N+". Medido a 4M: 3.5s -> ~0.1s.
+        COUNT_CAP = 10000
+        total_count = db.query(func.count()).select_from(
+            query.with_entities(WazuhVulnerability.id).limit(COUNT_CAP).subquery()
+        ).scalar()
 
     if sort_key and hasattr(WazuhVulnerability, sort_key):
         column = getattr(WazuhVulnerability, sort_key)
