@@ -1,0 +1,70 @@
+services:
+  local-db:
+    image: timescale/timescaledb:latest-pg15
+    container_name: local-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: vulnerabilidades_db
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: "1234"
+      ENFORCE_DB_SSL: "false"
+    ports:
+      - "5433:5432"
+    volumes:
+      - local_postgres_data:/var/lib/postgresql/data
+      - ./db-init:/docker-entrypoint-initdb.d:ro
+    networks:
+      - local-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d vulnerabilidades_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  local-api:
+    image: vuln-app-devsecops-api:latest
+    container_name: local-api
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    environment:
+      DATABASE_URL: postgresql://postgres:1234@local-db:5432/vulnerabilidades_db
+      ENCRYPTION_KEY: _PDHhMGJ7ej8t4jZVgwX4xht5A8RBGwN4mwmUD15NkM=
+      SECRET_KEY: supersecret
+      ENFORCE_DB_SSL: "false"
+    depends_on:
+      local-db:
+        condition: service_healthy
+    networks:
+      - local-network
+    volumes:
+      - ./certs:/app/certs:ro
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  local-frontend:
+    image: vuln-app-devsecops-frontend:latest
+    container_name: local-frontend
+    ports:
+      - "80:80"
+      - "8443:443"
+    volumes:
+      - ./nginx/ssl:/etc/nginx/ssl:ro
+      - ./local-nginx.conf:/etc/nginx/conf.d/default.conf:ro
+    depends_on:
+      local-api:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - local-network
+
+volumes:
+  local_postgres_data:
+
+networks:
+  local-network:
+    driver: bridge
