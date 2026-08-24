@@ -270,38 +270,41 @@ def _mark_obsolete_pg(db: Session, conn_id: int, sync_start_time):
     # los datos de vulns); para el caso comun (agente con varias vulns) la heuristica acierta.
     params = {"conn_id": conn_id, "sync_start": sync_start_time}
 
-    # "El agente sigue presente" = existe otra vuln del MISMO host (agent_name) vista en este sync.
-    # Se compara por agent_name, NO por agent_id: Wazuh recicla los IDs (al eliminar un agente y
-    # registrar otro reusa el mismo id, ej: 001), asi que el id no identifica de forma estable al
-    # host. Si dos hosts distintos comparten id, comparar por id marcaria RESOLVED un host dado de
-    # baja solo porque OTRO host heredo su id.
-    agent_present = """EXISTS (
-        SELECT 1 FROM wazuh_vulnerabilities w2
-        WHERE w2.connection_id = v.connection_id
-          AND w2.agent_name IS NOT DISTINCT FROM v.agent_name
-          AND w2.last_seen >= :sync_start
-    )"""
+    # "Hosts presentes" = agent_name visto en este sync. Se precalcula UNA vez en una temp table en
+    # vez de un EXISTS correlacionado por fila. Motivo: `agent_name IS NOT DISTINCT FROM ...` NO es
+    # sargable (no usa indice) -> el EXISTS hacia un seq scan por cada fila candidata, y a 1M+ filas
+    # el sync se colgaba (>6 min). Con el set precomputado cada statement es un semi-join simple.
+    # Se compara por agent_name (no agent_id): Wazuh recicla los IDs al re-registrar un agente, asi
+    # que el id no identifica de forma estable al host.
+    db.execute(text("DROP TABLE IF EXISTS _present_hosts"))
+    db.execute(text("""
+        CREATE TEMP TABLE _present_hosts AS
+        SELECT DISTINCT agent_name FROM wazuh_vulnerabilities
+        WHERE connection_id = :conn_id AND last_seen >= :sync_start AND agent_name IS NOT NULL
+    """), params)
+    db.execute(text("CREATE INDEX ON _present_hosts (agent_name)"))
 
-    # Historial: RESOLVED (agente presente = parche)
-    db.execute(text(f"""
+    # Historial: RESOLVED (host presente = parche)
+    db.execute(text("""
         INSERT INTO vulnerability_history (vulnerability_id, action, details, timestamp)
         SELECT v.id, 'RESOLVED', 'Ya no es reportada por el agente (probablemente parcheada)', :sync_start
         FROM wazuh_vulnerabilities v
         WHERE v.connection_id = :conn_id AND v.status = 'ACTIVE' AND v.last_seen < :sync_start
-          AND {agent_present}
+          AND v.agent_name IN (SELECT agent_name FROM _present_hosts)
     """), params)
-    # Historial: AGENT_REMOVED (agente dado de baja)
-    db.execute(text(f"""
+    # Historial: AGENT_REMOVED (host ausente = dado de baja)
+    db.execute(text("""
         INSERT INTO vulnerability_history (vulnerability_id, action, details, timestamp)
         SELECT v.id, 'AGENT_REMOVED', 'El agente dejo de reportar (host dado de baja); no implica remediacion', :sync_start
         FROM wazuh_vulnerabilities v
         WHERE v.connection_id = :conn_id AND v.status = 'ACTIVE' AND v.last_seen < :sync_start
-          AND NOT {agent_present}
+          AND (v.agent_name IS NULL OR v.agent_name NOT IN (SELECT agent_name FROM _present_hosts))
     """), params)
-    # Estado: RESOLVED o AGENT_REMOVED segun si el agente sigue presente
-    db.execute(text(f"""
+    # Estado: RESOLVED o AGENT_REMOVED segun si el host sigue presente
+    db.execute(text("""
         UPDATE wazuh_vulnerabilities v
-        SET status = CASE WHEN {agent_present} THEN 'RESOLVED' ELSE 'AGENT_REMOVED' END
+        SET status = CASE WHEN v.agent_name IN (SELECT agent_name FROM _present_hosts)
+                          THEN 'RESOLVED' ELSE 'AGENT_REMOVED' END
         WHERE v.connection_id = :conn_id AND v.status = 'ACTIVE' AND v.last_seen < :sync_start
     """), params)
 
