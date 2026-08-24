@@ -1,6 +1,6 @@
 """Tests del ciclo de vida de vulnerabilidades en el sync (camino en memoria/ORM):
 DETECTED -> actualización -> SEVERITY_CHANGED -> RESOLVED -> REOPENED."""
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 from app.models import WazuhConnection, WazuhVulnerability, VulnerabilityHistory
 from app.services.wazuhService import _process_sqlite, _mark_obsolete_sqlite
@@ -49,7 +49,7 @@ def _history_actions(db, vuln_id):
 def test_process_creates_vuln_with_detected_history(db_session):
     conn = _create_connection(db_session)
 
-    count = _process_sqlite(db_session, conn.id, [_raw()])
+    count = _process_sqlite(db_session, conn.id, [_raw()], datetime.now(timezone.utc))
     db_session.commit()
 
     assert count == 1
@@ -65,7 +65,7 @@ def test_process_ignores_entries_without_cve(db_session):
     raw = _raw()
     raw["vulnerability"].pop("id")
 
-    count = _process_sqlite(db_session, conn.id, [raw])
+    count = _process_sqlite(db_session, conn.id, [raw], datetime.now(timezone.utc))
     db_session.commit()
 
     assert count == 0
@@ -75,7 +75,7 @@ def test_process_ignores_entries_without_cve(db_session):
 def test_process_deduplicates_within_batch(db_session):
     conn = _create_connection(db_session)
 
-    count = _process_sqlite(db_session, conn.id, [_raw(), _raw()])
+    count = _process_sqlite(db_session, conn.id, [_raw(), _raw()], datetime.now(timezone.utc))
     db_session.commit()
 
     assert count == 1
@@ -84,10 +84,10 @@ def test_process_deduplicates_within_batch(db_session):
 
 def test_process_registers_severity_change(db_session):
     conn = _create_connection(db_session)
-    _process_sqlite(db_session, conn.id, [_raw(severity="High")])
+    _process_sqlite(db_session, conn.id, [_raw(severity="High")], datetime.now(timezone.utc))
     db_session.commit()
 
-    _process_sqlite(db_session, conn.id, [_raw(severity="Critical")])
+    _process_sqlite(db_session, conn.id, [_raw(severity="Critical")], datetime.now(timezone.utc))
     db_session.commit()
 
     vuln = db_session.query(WazuhVulnerability).one()
@@ -97,7 +97,7 @@ def test_process_registers_severity_change(db_session):
 
 def test_mark_obsolete_resolves_stale_vulns(db_session):
     conn = _create_connection(db_session)
-    _process_sqlite(db_session, conn.id, [_raw()])
+    _process_sqlite(db_session, conn.id, [_raw()], datetime.now(timezone.utc))
     db_session.commit()
     vuln = db_session.query(WazuhVulnerability).one()
     # Simular que el ultimo sync la vio hace una semana
@@ -114,13 +114,13 @@ def test_mark_obsolete_resolves_stale_vulns(db_session):
 
 def test_process_reopens_resolved_vuln(db_session):
     conn = _create_connection(db_session)
-    _process_sqlite(db_session, conn.id, [_raw()])
+    _process_sqlite(db_session, conn.id, [_raw()], datetime.now(timezone.utc))
     db_session.commit()
     vuln = db_session.query(WazuhVulnerability).one()
     vuln.status = "RESOLVED"
     db_session.commit()
 
-    _process_sqlite(db_session, conn.id, [_raw()])
+    _process_sqlite(db_session, conn.id, [_raw()], datetime.now(timezone.utc))
     db_session.commit()
 
     vuln = db_session.query(WazuhVulnerability).one()
@@ -132,7 +132,7 @@ def test_full_lifecycle_detected_resolved_reopened(db_session):
     """Ciclo completo: detectada -> desaparece (RESOLVED) -> reaparece (REOPENED)."""
     conn = _create_connection(db_session)
 
-    _process_sqlite(db_session, conn.id, [_raw()])
+    _process_sqlite(db_session, conn.id, [_raw()], datetime.now(timezone.utc))
     db_session.commit()
     vuln = db_session.query(WazuhVulnerability).one()
     vuln.last_seen = datetime.now() - timedelta(days=3)
@@ -142,7 +142,7 @@ def test_full_lifecycle_detected_resolved_reopened(db_session):
     db_session.commit()
     assert db_session.query(WazuhVulnerability).one().status == "RESOLVED"
 
-    _process_sqlite(db_session, conn.id, [_raw()])
+    _process_sqlite(db_session, conn.id, [_raw()], datetime.now(timezone.utc))
     db_session.commit()
 
     vuln = db_session.query(WazuhVulnerability).one()

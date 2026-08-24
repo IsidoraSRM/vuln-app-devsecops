@@ -178,13 +178,13 @@
         </div>
 
         <div class="f-group popover-wrap" v-click-outside="() => (dropdowns.os = false)">
-          <label>Sistema Operativo</label>
-          <button type="button" class="filter-input dd-btn" @click="dropdowns.os = !dropdowns.os" :disabled="!osOptions.length">
+          <label id="lbl-os">Sistema Operativo</label>
+          <button type="button" aria-labelledby="lbl-os" class="filter-input dd-btn" @click="dropdowns.os = !dropdowns.os" :disabled="!osOptions.length">
             <span>{{ selectedOS.length ? selectedOS.length + ' sel.' : 'Todos' }}</span>
             <span>▼</span>
           </button>
           <div v-if="dropdowns.os" class="dd-panel fade-in">
-            <input type="text" v-model="search.os" placeholder="Buscar SO..." class="dd-search">
+            <input type="text" v-model="search.os" aria-label="Buscar Sistema Operativo" placeholder="Buscar SO..." class="dd-search">
             <div class="dd-actions">
               <span @click="selectedOS = [...osOptions]; fetchVulns();">Todos</span>
               <span @click="selectedOS = []; fetchVulns();">Limpiar</span>
@@ -198,20 +198,20 @@
         </div>
 
         <div class="f-group date-group">
-          <label>Fecha Detección</label>
-          <div class="range-inputs">
-            <input type="date" v-model="detectedAfter" @change="triggerFilterChange" class="filter-input-sm" title="Desde">
+          <label id="lbl-fecha">Fecha Detección</label>
+          <div class="range-inputs" aria-labelledby="lbl-fecha">
+            <input type="date" aria-label="Fecha de detección desde" v-model="detectedAfter" @change="triggerFilterChange" class="filter-input-sm" title="Desde">
             <span>-</span>
-            <input type="date" v-model="detectedBefore" @change="triggerFilterChange" class="filter-input-sm" title="Hasta">
+            <input type="date" aria-label="Fecha de detección hasta" v-model="detectedBefore" @change="triggerFilterChange" class="filter-input-sm" title="Hasta">
           </div>
         </div>
 
         <div class="f-group">
-          <label>Score CVSS (Base)</label>
-          <div class="range-inputs">
-            <input type="number" v-model.number="scoreMin" @input="triggerFilterChange" min="0" max="10" step="0.1" placeholder="Min" class="filter-input-sm">
+          <label id="lbl-cvss">Score CVSS (Base)</label>
+          <div class="range-inputs" aria-labelledby="lbl-cvss">
+            <input type="number" aria-label="Score CVSS Mínimo" v-model.number="scoreMin" @input="triggerFilterChange" min="0" max="10" step="0.1" placeholder="Min" class="filter-input-sm">
             <span>-</span>
-            <input type="number" v-model.number="scoreMax" @input="triggerFilterChange" min="0" max="10" step="0.1" placeholder="Max" class="filter-input-sm">
+            <input type="number" aria-label="Score CVSS Máximo" v-model.number="scoreMax" @input="triggerFilterChange" min="0" max="10" step="0.1" placeholder="Max" class="filter-input-sm">
           </div>
         </div>
       </div>
@@ -768,6 +768,9 @@ const clearFilters = () => {
   selectedVulns.value = []
   selectedPackages.value = []
   selectedSeverities.value = []
+  selectedOS.value = []
+  detectedAfter.value = ''
+  detectedBefore.value = ''
   scoreMin.value = ''
   scoreMax.value = ''
   currentPage.value = 1
