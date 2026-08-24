@@ -23,9 +23,9 @@ def _create_connection(db, name="test-conn"):
     return conn
 
 
-def _raw(cve="CVE-2026-1000", severity="High", agent_id="001", pkg="curl"):
+def _raw(cve="CVE-2026-1000", severity="High", agent_id="001", pkg="curl", agent_name="host-1"):
     return {
-        "agent": {"id": agent_id, "name": "host-1"},
+        "agent": {"id": agent_id, "name": agent_name},
         "host": {"os": {"full": "Ubuntu 22.04", "platform": "ubuntu", "version": "22.04"}},
         "package": {"name": pkg, "version": "1.0", "type": "deb", "architecture": "amd64"},
         "vulnerability": {
@@ -151,6 +151,32 @@ def test_agent_removed_reopens_when_agent_returns(db_session):
     v = db_session.query(WazuhVulnerability).one()
     assert v.status == "ACTIVE"
     assert "REOPENED" in _history_actions(db_session, v.id)
+
+
+def test_agent_removed_despite_agent_id_reuse(db_session):
+    """Dos hosts DISTINTOS con el MISMO agent_id (Wazuh recicla IDs; tambien pasa con data sintetica):
+    el host que desaparece -> AGENT_REMOVED, aunque su agent_id siga presente por el OTRO host.
+    Antes se comparaba por agent_id y esto daba RESOLVED (falso parche)."""
+    conn = _create_connection(db_session)
+    # Mismo agent_id '001', nombres de host distintos.
+    _process_sqlite(db_session, conn.id, [
+        _raw(cve="CVE-GONE", agent_id="001", agent_name="host-viejo"),
+        _raw(cve="CVE-LIVE", agent_id="001", agent_name="host-nuevo"),
+    ], datetime.now(timezone.utc))
+    db_session.commit()
+    now = datetime.now()
+    gone = db_session.query(WazuhVulnerability).filter_by(cve_id="CVE-GONE").one()
+    live = db_session.query(WazuhVulnerability).filter_by(cve_id="CVE-LIVE").one()
+    gone.last_seen = now - timedelta(days=7)     # host-viejo dejo de reportar
+    live.last_seen = now + timedelta(minutes=1)  # host-nuevo (mismo id 001) sigue activo
+    db_session.commit()
+
+    _mark_obsolete_sqlite(db_session, conn.id, now)
+    db_session.commit()
+
+    gone = db_session.query(WazuhVulnerability).filter_by(cve_id="CVE-GONE").one()
+    assert gone.status == "AGENT_REMOVED"
+    assert "AGENT_REMOVED" in _history_actions(db_session, gone.id)
 
 
 def test_process_reopens_resolved_vuln(db_session):

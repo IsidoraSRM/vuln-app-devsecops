@@ -270,11 +270,15 @@ def _mark_obsolete_pg(db: Session, conn_id: int, sync_start_time):
     # los datos de vulns); para el caso comun (agente con varias vulns) la heuristica acierta.
     params = {"conn_id": conn_id, "sync_start": sync_start_time}
 
-    # "El agente sigue presente" = existe otra vuln del mismo agente vista en este sync.
+    # "El agente sigue presente" = existe otra vuln del MISMO host (agent_name) vista en este sync.
+    # Se compara por agent_name, NO por agent_id: Wazuh recicla los IDs (al eliminar un agente y
+    # registrar otro reusa el mismo id, ej: 001), asi que el id no identifica de forma estable al
+    # host. Si dos hosts distintos comparten id, comparar por id marcaria RESOLVED un host dado de
+    # baja solo porque OTRO host heredo su id.
     agent_present = """EXISTS (
         SELECT 1 FROM wazuh_vulnerabilities w2
         WHERE w2.connection_id = v.connection_id
-          AND w2.agent_id IS NOT DISTINCT FROM v.agent_id
+          AND w2.agent_name IS NOT DISTINCT FROM v.agent_name
           AND w2.last_seen >= :sync_start
     )"""
 
@@ -352,17 +356,18 @@ def _mark_obsolete_sqlite(db: Session, conn_id: int, sync_start_time):
     if not obsolete_vulns:
         return
 
-    # Agentes que reportaron algo en este sync (al menos una vuln con last_seen >= inicio). Si el
-    # agente de una vuln obsoleta NO esta aca, dejo de reportar por completo -> host dado de baja.
+    # Hosts que reportaron algo en este sync (al menos una vuln con last_seen >= inicio). Si el
+    # host de una vuln obsoleta NO esta aca, dejo de reportar por completo -> host dado de baja.
+    # Se identifica el host por agent_name (no agent_id): Wazuh recicla los IDs al re-registrar.
     present_agents = {
-        a for (a,) in db.query(WazuhVulnerability.agent_id).filter(
+        a for (a,) in db.query(WazuhVulnerability.agent_name).filter(
             WazuhVulnerability.connection_id == conn_id,
             WazuhVulnerability.last_seen >= sync_start_time,
         ).distinct().all()
     }
 
     for db_vuln in obsolete_vulns:
-        if db_vuln.agent_id in present_agents:
+        if db_vuln.agent_name in present_agents:
             db_vuln.status = "RESOLVED"
             db_vuln.history.append(VulnerabilityHistory(
                 action="RESOLVED",
