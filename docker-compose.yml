@@ -1,40 +1,15 @@
-# Compose para DESARROLLO LOCAL y el PIPELINE (CI/CD): levanta los 3 servicios
-# juntos en una sola red. Para PRODUCCION multi-host (BD y app en hosts distintos
-# con TLS) usar los archivos de prod_config/ (docker-compose.db.yml + app-only.yml).
 services:
-  db-api:
-    image: timescale/timescaledb:latest-pg15
-    container_name: db-api
-    restart: unless-stopped
-    command: postgres -c shared_preload_libraries=timescaledb
-    env_file:
-      - .env
-    ports:
-      - "5433:5432"
-    volumes:
-      - postgres_api_data:/var/lib/postgresql/data
-      - ./db-init:/docker-entrypoint-initdb.d:ro
-    networks:
-      - app-network
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
-      interval: 5s
-      timeout: 5s
-      retries: 5
-      start_period: 60s
-
   api:
     build: ./vuln-api
     container_name: api
     ports:
       - "8000:8000"
     environment:
-      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db-api:5432/${POSTGRES_DB}
+      # Se asume que DATABASE_URL ya contiene los parámetros SSL necesarios (ej: ?sslmode=require)
+      # y apunta a la IP externa de la base de datos.
+      DATABASE_URL: ${DATABASE_URL}
       ENCRYPTION_KEY: ${ENCRYPTION_KEY}
       SECRET_KEY: ${SECRET_KEY}
-    depends_on:
-      db-api:
-        condition: service_healthy
     networks:
       - app-network
     restart: unless-stopped
@@ -68,9 +43,6 @@ services:
     restart: unless-stopped
     networks:
       - app-network
-
-volumes:
-  postgres_api_data:
 
 networks:
   app-network:
