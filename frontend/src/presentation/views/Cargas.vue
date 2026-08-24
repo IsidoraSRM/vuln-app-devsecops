@@ -177,6 +177,35 @@
           </div>
         </div>
 
+        <div class="f-group popover-wrap" v-click-outside="() => (dropdowns.os = false)">
+          <label>Sistema Operativo</label>
+          <button type="button" class="filter-input dd-btn" @click="dropdowns.os = !dropdowns.os" :disabled="!osOptions.length">
+            <span>{{ selectedOS.length ? selectedOS.length + ' sel.' : 'Todos' }}</span>
+            <span>▼</span>
+          </button>
+          <div v-if="dropdowns.os" class="dd-panel fade-in">
+            <input type="text" v-model="search.os" placeholder="Buscar SO..." class="dd-search">
+            <div class="dd-actions">
+              <span @click="selectedOS = [...osOptions]; fetchVulns();">Todos</span>
+              <span @click="selectedOS = []; fetchVulns();">Limpiar</span>
+            </div>
+            <div class="dd-list custom-scroll">
+              <label v-for="os in filteredOS" :key="os" class="dd-item">
+                <input type="checkbox" :value="os" v-model="selectedOS" @change="triggerFilterChange"> {{ os }}
+              </label>
+            </div>
+          </div>
+        </div>
+
+        <div class="f-group">
+          <label>Fecha Detección</label>
+          <div class="range-inputs">
+            <input type="date" v-model="detectedAfter" @change="triggerFilterChange" class="filter-input-sm" title="Desde">
+            <span>-</span>
+            <input type="date" v-model="detectedBefore" @change="triggerFilterChange" class="filter-input-sm" title="Hasta">
+          </div>
+        </div>
+
         <div class="f-group">
           <label>Score CVSS (Base)</label>
           <div class="range-inputs">
@@ -452,12 +481,16 @@ const agentOptions = ref([])
 const vulnOptions = ref([])
 const packageOptions = ref([])
 const severityOptions = ref([])
+const osOptions = ref([])
 
 // Valores seleccionados
 const selectedConnection = ref('')
 const selectedAgents = ref([])
 const selectedVulns = ref([])
 const selectedPackages = ref([])
+const selectedOS = ref([])
+const detectedAfter = ref('')
+const detectedBefore = ref('')
 // FILTRO PREESTABLECIDO: Críticas
 const selectedSeverities = ref(['CRITICAL'])
 const scoreMin = ref('')
@@ -534,8 +567,8 @@ onMounted(() => {
   })
 })
 
-const search = reactive({ agent: '', vuln: '', package: '' })
-const dropdowns = reactive({ agents: false, vulns: false, packages: false, severity: false })
+const search = reactive({ agent: '', vuln: '', package: '', os: '' })
+const dropdowns = reactive({ agents: false, vulns: false, packages: false, severity: false, os: false })
 
 const filteredAgents = computed(() =>
   agentOptions.value.filter(agent => agent.toLowerCase().includes(search.agent.toLowerCase()))
@@ -545,6 +578,9 @@ const filteredCVEOptions = computed(() =>
 )
 const filteredPackages = computed(() =>
   packageOptions.value.filter(pkg => pkg.toLowerCase().includes(search.package.toLowerCase()))
+)
+const filteredOS = computed(() =>
+  osOptions.value.filter(os => os.toLowerCase().includes(search.os.toLowerCase()))
 )
 
 const getSeverityLevel = (s) => {
@@ -596,6 +632,9 @@ const fetchVulns = async () => {
       cargas_page: cargasPage.value,
       cargas_limit: cargasLimit.value,
       cargas_order: cargasOrder.value,
+      os_platform: selectedOS.value,
+      detected_after: detectedAfter.value || null,
+      detected_before: detectedBefore.value || null,
     }
 
     const res = await vulnService.getVulns(params)
@@ -620,11 +659,14 @@ const fetchVulns = async () => {
 const fetchFilterOptionsData = async () => {
   try {
     const res = await vulnService.getUniqueFilters(selectedConnection.value || null)
-    const { agents, cves, packages, severities } = res.data || {}
+    const { agents, cves, packages, severities, os_list } = res.data || {}
     
     agentOptions.value = (agents || []).sort()
     vulnOptions.value = (cves || []).sort()
     packageOptions.value = (packages || []).sort()
+    
+    const uniquePlatforms = [...new Set((os_list || []).map(o => o.platform).filter(Boolean))]
+    osOptions.value = uniquePlatforms.sort()
     
     severityOptions.value = (severities || [])
       .map(s => s.toUpperCase())
