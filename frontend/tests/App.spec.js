@@ -130,6 +130,7 @@ describe('App.vue', () => {
   })
 
   it('navigates to config-user when clicking administrar usuarios', async () => {
+    localStorage.setItem('role', 'superadmin')
     const wrapper = mount(App, {
       global: {
         stubs: ['router-view', 'router-link']
@@ -146,6 +147,7 @@ describe('App.vue', () => {
   })
 
   it('navigates to config-wazuh when clicking wazuh config link', async () => {
+    localStorage.setItem('role', 'superadmin')
     const wrapper = mount(App, {
       global: {
         stubs: ['router-view', 'router-link']
@@ -153,7 +155,7 @@ describe('App.vue', () => {
     })
 
     const configWazuhLink = wrapper.findAll('.nav-item').find(el =>
-      el.text().includes('Administar conexiones Wazuh')
+      el.text().includes('Administrar conexiones Wazuh')
     )
 
     await configWazuhLink.trigger('click')

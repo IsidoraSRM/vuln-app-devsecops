@@ -664,13 +664,13 @@ const fetchVulns = async () => {
 const fetchFilterOptionsData = async () => {
   try {
     const res = await vulnService.getUniqueFilters(selectedConnection.value || null)
-    const { agents, cves, packages, severities, os_list } = res.data || {}
+    const { agents, cves, packages, severities, os } = res.data || {}
     
     agentOptions.value = (agents || []).sort()
     vulnOptions.value = (cves || []).sort()
     packageOptions.value = (packages || []).sort()
     
-    const uniquePlatforms = [...new Set((os_list || []).map(o => o.platform).filter(Boolean))]
+    const uniquePlatforms = [...new Set((os || []).map(o => o.platform).filter(Boolean))]
     osOptions.value = uniquePlatforms.sort()
     
     severityOptions.value = (severities || [])

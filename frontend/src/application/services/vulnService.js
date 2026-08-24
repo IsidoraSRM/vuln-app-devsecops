@@ -31,6 +31,15 @@ export default {
         if (params.severity && params.severity.length > 0) {
             queryParams.severity = params.severity
         }
+        if (params.os_platform && params.os_platform.length > 0) {
+            queryParams.os_platform = params.os_platform
+        }
+        if (params.detected_after) {
+            queryParams.detected_after = params.detected_after
+        }
+        if (params.detected_before) {
+            queryParams.detected_before = params.detected_before
+        }
 
         // Rangos de Score numérico
         if (params.score_min !== undefined && params.score_min !== null && params.score_min !== '') {

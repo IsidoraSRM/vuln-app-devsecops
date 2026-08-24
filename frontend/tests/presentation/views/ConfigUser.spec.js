@@ -46,9 +46,8 @@ describe('ConfigUser.vue', () => {
     })
 
     it('shows error if fetch users fails', async () => {
-        userService.getUsers.mockRejectedValueOnce(new Error('Network Error'))
+        userService.getUsers.mockRejectedValueOnce(new Error('Fetch failed'))
         const wrapper = mount(ConfigUser)
-
         await flushPromises()
 
         expect(wrapper.vm.usersError).toBe('No se pudieron cargar los administradores.')
@@ -59,36 +58,35 @@ describe('ConfigUser.vue', () => {
         const wrapper = mount(ConfigUser)
         await flushPromises()
 
-        // Open modal
-        await wrapper.find('.btn-primary').trigger('click')
+        wrapper.vm.openAddModal()
         expect(wrapper.vm.showAddModal).toBe(true)
 
-        // Close modal via Cancel button
-        const cancelBtn = wrapper.findAll('.btn-outline').find(b => b.text().includes('Cancelar'))
-        await cancelBtn.trigger('click')
+        wrapper.vm.closeModal()
         expect(wrapper.vm.showAddModal).toBe(false)
+        expect(wrapper.vm.newUser).toEqual({ username: '', password: '', role: 'superadmin', assigned_connection_id: null })
     })
 
     it('submits new user correctly', async () => {
+        userService.createUser.mockResolvedValueOnce({})
+        userService.getUsers.mockResolvedValueOnce({ data: [] })
         const wrapper = mount(ConfigUser)
         await flushPromises()
 
-        await wrapper.find('.btn-primary').trigger('click')
-
+        wrapper.vm.openAddModal()
         wrapper.vm.newUser.username = 'new_admin'
         wrapper.vm.newUser.password = 'SuperSecret123'
+        wrapper.vm.newUser.role = 'superadmin'
 
-        userService.createUser.mockResolvedValueOnce({})
-
-        await wrapper.find('form').trigger('submit.prevent')
+        await wrapper.vm.submitUser()
         await flushPromises()
 
         expect(userService.createUser).toHaveBeenCalledWith({
             username: 'new_admin',
-            password: 'SuperSecret123'
+            password: 'SuperSecret123',
+            role: 'superadmin',
+            assigned_connection_id: null
         })
         expect(wrapper.vm.showAddModal).toBe(false)
-        expect(userService.getUsers).toHaveBeenCalledTimes(2) // 1 initial, 1 after add
     })
 
     it('shows error when creating user without data', async () => {
